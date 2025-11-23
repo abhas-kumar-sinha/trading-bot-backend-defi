@@ -335,6 +335,7 @@ class AnalysisService {
 
       if (!currentBNBPrice) {
         logger.warn("❌ No BNB price found");
+        this.pendingBuyingTokens.delete(transaction.txHash);
         return null;
       }
 

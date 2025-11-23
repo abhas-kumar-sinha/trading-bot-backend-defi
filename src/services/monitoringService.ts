@@ -36,7 +36,7 @@ class MonitoringService {
   
   // WebSocket connections for active positions
   public activeWebSockets: Map<string, WebSocketConnection> = new Map();
-  private readonly SINTRAL_WS_URL = process.env.SINTRAL_WS_URL || 'wss://ws.sintral.io';
+  private readonly SINTRAL_WS_URL = process.env.SINTRAL_WS_URL || 'wss://nbstream.binance.com/w3w/stream';
   private readonly KLINE_INTERVAL = '1s';
 
   async start(): Promise<void> {
@@ -226,23 +226,24 @@ class MonitoringService {
       reconnectAttempts: 0
     };
 
+    
     this.activeWebSockets.set(lowerCA, connection);
-
+    
     ws.on('open', () => {
       logger.info(`✅ WebSocket connected for ${tokenSymbol}`);
       
-      // Send PING
+      // Send Get_property
       ws.send(JSON.stringify({
         id: 1,
-        method: 'PING',
-        params: []
+        method: 'GET_PROPERTY',
+        params: ["combined"]
       }));
 
       // Subscribe to kline data
       ws.send(JSON.stringify({
-        id: 3,
-        method: 'SUBSCRIPTION',
-        params: [`datahub@kline@14@${tokenCA}@${this.KLINE_INTERVAL}`]
+        id: 2,
+        method: 'SUBSCRIBE',
+        params: [`kl@14@${tokenCA === "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE" ? "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c" : tokenCA}@${this.KLINE_INTERVAL}`]
       }));
 
       connection.reconnectAttempts = 0;
@@ -276,19 +277,6 @@ class MonitoringService {
         this.activeWebSockets.delete(lowerCA);
       }
     });
-
-    // Keep-alive ping every 30 seconds
-    const pingInterval = setInterval(() => {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({
-          id: 1,
-          method: 'PING',
-          params: []
-        }));
-      } else {
-        clearInterval(pingInterval);
-      }
-    }, 30000);
   }
 
   /**
