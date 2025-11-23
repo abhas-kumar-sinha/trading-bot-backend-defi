@@ -331,7 +331,7 @@ class AnalysisService {
 
       try {
       // This is the main buy order
-      const currentBNBPrice = monitoringService.activeWebSockets.get(monitoringService.NATIVE_TOKEN)?.lastPrice;
+      const currentBNBPrice = monitoringService.activeWebSockets.get(monitoringService.NATIVE_TOKEN_DATA)?.lastPrice;
 
       if (!currentBNBPrice) {
         logger.warn("❌ No BNB price found");
@@ -343,7 +343,7 @@ class AnalysisService {
       const amountInWei = parseUnits(bnbToSpend.toFixed(18), 18);
       const params = new URLSearchParams({
         buyToken: transaction.ca,
-        sellToken: monitoringService.NATIVE_TOKEN,
+        sellToken: monitoringService.NATIVE_TOKEN_TRADES,
         sellAmount: amountInWei.toString(),
         taker: this.walletAddress,
       });
@@ -488,7 +488,7 @@ class AnalysisService {
 
       const params = new URLSearchParams({
         sellToken: tokenAddress,
-        buyToken: monitoringService.NATIVE_TOKEN,
+        buyToken: monitoringService.NATIVE_TOKEN_TRADES,
         sellAmount: balance.toString(),
         taker,
       });

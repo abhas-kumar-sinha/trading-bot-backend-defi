@@ -23,7 +23,8 @@ class MonitoringService {
   private readonly MAX_OPEN_POSITIONS = 5; // Maximum number of concurrent positions
   private readonly STOP_LOSS_PERCENTAGE = -20; // Stop loss at -20%
   private readonly SMART_STOP_LOSS_PERCENTAGE = -40; // Smart money stop loss at -40%
-  public readonly NATIVE_TOKEN: string = "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE";
+  public readonly NATIVE_TOKEN_TRADES: string = "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE";
+  public readonly NATIVE_TOKEN_DATA: string = "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c";
   
   private smartMoneyData: SmartMoneyTransaction[] = [];
   private kolData: SmartMoneyTransaction[] = [];
@@ -64,9 +65,9 @@ class MonitoringService {
     logger.info(`📊 Loaded ${activePositions.length} existing positions from DB`);
 
     // BNB websocket connection
-    this.connectWebSocket(this.NATIVE_TOKEN, "BNB");
+    this.connectWebSocket(this.NATIVE_TOKEN_DATA, "BNB");
     //wait to get bnb price
-    await new Promise(resolve => setTimeout(resolve, 1000));
+    await new Promise(resolve => setTimeout(resolve, 5000));
 
     // Immediate first fetch
     this.performMonitoringCycle();
@@ -243,7 +244,7 @@ class MonitoringService {
       ws.send(JSON.stringify({
         id: 2,
         method: 'SUBSCRIBE',
-        params: [`kl@14@${tokenCA === "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE" ? "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c" : tokenCA}@${this.KLINE_INTERVAL}`]
+        params: [`kl@14@${tokenCA}@${this.KLINE_INTERVAL}`]
       }));
 
       connection.reconnectAttempts = 0;
@@ -253,9 +254,9 @@ class MonitoringService {
       try {
         const msg = JSON.parse(data.toString());
         
+        const klineData = msg?.data?.d?.u;
         // Handle kline updates
-        if (msg.d && msg.d.u) {
-          const klineData = msg.d.u;
+        if (klineData) {
           await this.handleKlineUpdate(connection, klineData);
         }
       } catch (error) {
@@ -291,7 +292,7 @@ class MonitoringService {
       connection.lastPrice = currentPrice;
 
       // BNB price update
-      if (connection.tokenCA === this.NATIVE_TOKEN) {
+      if (connection.tokenCA === this.NATIVE_TOKEN_DATA) {
         return;
       }
 
