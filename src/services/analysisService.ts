@@ -132,7 +132,7 @@ class AnalysisService {
     const isSell = transaction.tradeSideCategory === 21 || transaction.tradeSideCategory === 29;
     const timePassed = this.timeAgo(transaction.ts);
 
-    if (isBuy && timePassed < 10000000 && marketCap >= this.ANALYSIS_THRESHOLDS.MIN_MARKET_CAP) {
+    if (isBuy && timePassed < 10 && marketCap >= this.ANALYSIS_THRESHOLDS.MIN_MARKET_CAP) {
       // Create buy signal
       return {
         type: 'FOLLOWING_BUY',
