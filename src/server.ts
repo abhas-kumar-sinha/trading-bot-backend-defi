@@ -33,6 +33,7 @@ app.get('/', (req, res) => {
       kline: '/api/kline',
       token: {
         list: '/api/token/list',
+        position: '/api/token/:address/token-position',
         details: '/api/token/:address/details',
         analysis: '/api/token/:address/analysis',
         marketDynamics: '/api/token/:address/market-dynamics',
@@ -48,7 +49,7 @@ app.get('/', (req, res) => {
       tradeStats: '/api/trade-stats/:address',
       positions: {
         active: '/api/positions',
-        closed: '/api/closed-positions'
+        closed: '/api/closed-positions',
       },
       walletBalance: '/api/wallet-balance',
       webhook: '/github/webhook',
@@ -94,6 +95,7 @@ app.get('/api/alerts', monitoringController.getAlerts);
 app.get('/api/stats', monitoringController.getStats);
 app.get('/api/kline', monitoringController.getKlineData);
 app.get('/api/token/list', monitoringController.getTokenList);
+app.get('/api/token/:address/token-position', monitoringController.getTokenPosition);
 app.get('/api/token/:address/details', monitoringController.getTokenDetails);
 app.get('/api/token/:address/market-dynamics', monitoringController.getTokenMarketDynamics);
 app.get('/api/token/:address/analysis', monitoringController.getTokenAnalysis);

@@ -144,6 +144,31 @@ export class MonitoringController {
     }
   }
 
+  async getTokenPosition(req: Request, res: Response) {
+    try {
+      const { address } = req.params;
+      
+      if (!address) {
+        return res.status(400).json({
+          success: false,
+          error: 'Token address is required'
+        });
+      }
+
+      const tokenPosition = await analysisService.getTokenPosition(address);
+      res.json({
+        success: true,
+        data: tokenPosition
+      });
+    } catch (error) {
+      logger.error('Error getting token position:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Failed to fetch token position'
+      });
+    }
+  }
+
   async getTokenDetails(req: Request, res: Response) {
     try {
       const { address } = req.params;

@@ -588,6 +588,15 @@ class AnalysisService {
     };
   }
 
+  async getTokenPosition(address: string): Promise<TradePositionExtended[] | undefined> {
+    const closedPositions = await this.getClosedPositions();
+    const allPositions = [...this.activePositions.values(), ...closedPositions];
+
+    const tokenPosition: TradePositionExtended[] | undefined = allPositions.filter(position => position.tokenCA.toLowerCase() === address.toLowerCase());
+
+    return tokenPosition;
+  }
+
   getActivePositions(): TradePositionExtended[] {
     return Array.from(this.activePositions.values());
   }
@@ -600,9 +609,11 @@ class AnalysisService {
     const closedPositions = await pool.query(`SELECT * FROM trades WHERE exitTimestamp IS NOT NULL`);
     const rows = closedPositions.rows ?? [];
 
+    const result: TradePositionExtended[] = [];
+
     for (const row of rows) {
       try {
-          const tokenCA = (row.tokenca || row.tokenca || row.contractaddress || "").toString();
+          const tokenCA = (row.tokenca || "").toString();
           if (!tokenCA) {
             logger.warn("Skipped DB row without tokenCA:", row);
             continue;
@@ -636,13 +647,13 @@ class AnalysisService {
             profitLoss: row.profitloss !== null ? Number(row.profitloss) : 0,
           };
 
-          this.activePositions.set(tokenCA.toLowerCase(), position);
+          result.push(position);
         } catch (error) {
           logger.error("Error processing DB row:", error);
         }
       }
 
-      return rows;
+      return result;
   }
 
   async getWalletBalance(): Promise<{timestamp: number, profitLoss: number}[]> {
