@@ -1,4 +1,3 @@
-import axios from "axios";
 import pool, { initDB } from "../db";
 import { SmartMoneyTransaction, TrendingToken, TokenAnalysis, MonitoringAlert, TradePosition } from '../types/index';
 import { calculateRiskScore } from '../utils/helpers';
@@ -6,6 +5,7 @@ import logger from '../utils/logger';
 import binanceApi from "./binanceApi";
 import monitoringService from "./monitoringService";
 import { Contract, JsonRpcProvider, parseUnits, TransactionReceipt, TransactionRequest, Wallet } from "ethers";
+import { QuoteAggregator } from "./quoteAggregatorService";
 
 interface TradePositionExtended extends TradePosition {
   smartMoneyConfirmation: boolean;
@@ -14,12 +14,16 @@ interface TradePositionExtended extends TradePosition {
 
 class AnalysisService {
 
+  //aggregator
+  private aggregator: QuoteAggregator;
+
   //Pending Phase
   private pendingBuyingTokens: Set<string> = new Set();
   private pendingSellingTokens: Set<string> = new Set();
 
   // Wallet connection
   private readonly QUICKNODE_RPC: string = process.env.QUICKNODE_RPC!;
+  private readonly ONEINCH_API_KEY: string = process.env.ONEINCH_API_KEY!;
   private readonly PRIVATE_KEY: string = process.env.PRIVATE_KEY!;
   private readonly provider = new JsonRpcProvider(this.QUICKNODE_RPC);
   private readonly wallet = new Wallet(this.PRIVATE_KEY, this.provider);
@@ -38,6 +42,10 @@ class AnalysisService {
     BOOSTED_PROFIT_TARGET: 15, // 15% with smart money confirmation
     SMARTMONEY_CONFIRMATION_TIMEOUT: 1 * 60 * 60, // 1 hour
   };
+
+  constructor() {
+    this.aggregator = new QuoteAggregator(this.QUICKNODE_RPC, this.ONEINCH_API_KEY);
+  }
 
   private async ensureDBReady() {
     if (!this.dbInitialized) {
@@ -124,7 +132,7 @@ class AnalysisService {
     const isSell = transaction.tradeSideCategory === 21 || transaction.tradeSideCategory === 29;
     const timePassed = this.timeAgo(transaction.ts);
 
-    if (isBuy && timePassed < 10 && marketCap >= this.ANALYSIS_THRESHOLDS.MIN_MARKET_CAP) {
+    if (isBuy && timePassed < 10000000 && marketCap >= this.ANALYSIS_THRESHOLDS.MIN_MARKET_CAP) {
       // Create buy signal
       return {
         type: 'FOLLOWING_BUY',
@@ -234,74 +242,6 @@ class AnalysisService {
     );
   }
 
-  private async buildTxFromQuote(quote: any, fromAddress: string): Promise<TransactionRequest> {
-    if (!quote) throw new Error("Invalid quote");
-
-    const txSource = quote.transaction;
-
-    const to = txSource.to;
-    const data = txSource.data;
-
-    if (!to || !data) throw new Error("Invalid 0x buy quote: missing to/data");
-
-    // helper to normalize to bigint
-    const toBigInt = (v: unknown): bigint | undefined => {
-      if (v === undefined || v === null) return undefined;
-      if (typeof v === "bigint") return v;
-      if (typeof v === "number") return BigInt(Math.floor(v));
-      if (typeof v === "string") {
-        // string could be decimal or hex ("0x..")
-        return BigInt(v);
-      }
-      // other types - try coercion
-      return BigInt(String(v));
-    };
-
-    const tx: TransactionRequest = {
-      to,
-      data,
-      from: fromAddress,
-      value: toBigInt(txSource.value) ?? undefined,
-    };
-
-    // Determine gas (preferred order: estimatedGas -> gas)
-    const gasCandidate = txSource.estimatedGas ?? txSource.gas ?? quote.estimatedGas ?? quote.gas;
-
-    try {
-      if (gasCandidate) {
-        const g = toBigInt(gasCandidate)!; // safe because checked above
-        tx.gasLimit = (g * 120n) / 100n; // +20%
-      } else {
-        // Fallback: provider estimate
-        const est = await this.provider.estimateGas({
-          to: tx.to,
-          data: tx.data,
-          value: tx.value,
-          from: fromAddress,
-        });
-        // est may already be bigint
-        const estBig = typeof est === "bigint" ? est : BigInt(String(est));
-        tx.gasLimit = (estBig * 120n) / 100n;
-      }
-    } catch (err) {
-      // if estimateGas fails for any reason, use a safe default
-      const DEFAULT_GAS = 300_000n;
-      tx.gasLimit = (DEFAULT_GAS * 120n) / 100n;
-      logger.warn("estimateGas failed - using fallback gasLimit");
-    }
-
-    // Fees: prefer EIP-1559 (maxFeePerGas / maxPriorityFeePerGas), otherwise gasPrice
-    const maxFee = toBigInt(txSource.maxFeePerGas) ?? toBigInt(quote.maxFeePerGas) ?? undefined;
-    const maxPriority = toBigInt(txSource.maxPriorityFeePerGas) ?? toBigInt(quote.maxPriorityFeePerGas) ?? undefined;
-    const gasPrice = toBigInt(txSource.gasPrice) ?? toBigInt(quote.gasPrice) ?? undefined;
-
-    if (maxFee !== undefined) tx.maxFeePerGas = maxFee;
-    if (maxPriority !== undefined) tx.maxPriorityFeePerGas = maxPriority;
-    if (gasPrice !== undefined) tx.gasPrice = gasPrice;
-
-    return tx;
-  }
-
   private async sendAndWait(txRequest: TransactionRequest, timeoutMs = 120_000) {
     const signedTx = await this.wallet.sendTransaction(txRequest);
     const hash = signedTx.hash;
@@ -330,43 +270,48 @@ class AnalysisService {
       let txReq: TransactionRequest;
 
       try {
-      // This is the main buy order
-      const currentBNBPrice = monitoringService.activeWebSockets.get(monitoringService.NATIVE_TOKEN_DATA)?.lastPrice;
+        const currentBNBPrice = monitoringService.activeWebSockets.get(
+          monitoringService.NATIVE_TOKEN_DATA
+        )?.lastPrice;
 
-      if (!currentBNBPrice) {
-        logger.warn("❌ No BNB price found");
-        this.pendingBuyingTokens.delete(transaction.txHash);
-        return null;
-      }
+        if (!currentBNBPrice) {
+          logger.warn("❌ No BNB price found");
+          this.pendingBuyingTokens.delete(transaction.txHash);
+          return null;
+        }
 
-      const bnbToSpend = this.INR_TO_SPEND / (currentBNBPrice * 85);
-      const amountInWei = parseUnits(bnbToSpend.toFixed(18), 18);
-      const params = new URLSearchParams({
-        buyToken: transaction.ca,
-        sellToken: monitoringService.NATIVE_TOKEN_TRADES,
-        sellAmount: amountInWei.toString(),
-        taker: this.walletAddress,
-      });
+        const bnbToSpend = this.INR_TO_SPEND / (currentBNBPrice * 85);
+        const amountInWei = parseUnits(bnbToSpend.toFixed(18), 18);
 
-      const quoteUrl = `${this.QUICKNODE_RPC}/addon/1117/swap/allowance-holder/quote?chainId=56&${params.toString()}`;
-      const quoteRes = await axios.get(quoteUrl, { timeout: 15000 }).catch((e) => {
-        throw new Error("0x buy quote failed: " + ((e as any).response?.data?.reason || (e as any).message || e));
-      });
-      const quote = quoteRes.data;
-      if (!quote || !quote.liquidityAvailable) {
-        logger.info(`quote link: ${quoteUrl}`)
-        logger.info(`Invalid 0x buy quote: ${quote}`);
-        this.pendingBuyingTokens.delete(transaction.txHash);
-        return null;
-      }
+        // Get best quote from both providers
+        const result = await this.aggregator.getBestQuote({
+          sellToken: monitoringService.NATIVE_TOKEN_TRADES, // WBNB
+          buyToken: transaction.ca, // Target token
+          sellAmount: amountInWei.toString(),
+          taker: this.walletAddress,
+          slippage: '1', // 1% slippage
+        });
 
-      txReq = await this.buildTxFromQuote(quote, this.walletAddress);
+        if (!result) {
+          logger.info(`No valid quotes available for buy`);
+          this.pendingBuyingTokens.delete(transaction.txHash);
+          return null;
+        }
 
+        // Build transaction from best quote
+        txReq = await this.aggregator.buildTxFromQuote(
+          result.bestQuote.quote,
+          this.walletAddress
+        );
+
+        logger.info(`✅ BUY ORDER using ${result.bestQuote.provider}`);
+        
       } catch (error) {
         this.pendingBuyingTokens.delete(transaction.txHash);
         logger.error("❌ Error executing buy order:", error);
         return null;
       }
+
       // This is to store the token details
       await new Promise(resolve => setTimeout(resolve, 2000));
       const currentMarketDynamics = await binanceApi.getTokenMarketDynamics(transaction.ca);
@@ -458,77 +403,67 @@ class AnalysisService {
       this.pendingSellingTokens.add(position.entryTxHash);
 
       let txReq: TransactionRequest;
+
       try {
-      // This is the main sell order
-      const taker = this.walletAddress;
-      const tokenAddress = position.tokenCA;
+        const taker = this.walletAddress;
+        const tokenAddress = position.tokenCA;
 
-      // ERC20 helper
-      const ERC20 = new Contract(tokenAddress, [
-        "function balanceOf(address owner) view returns (uint256)",
-        "function allowance(address owner, address spender) view returns (uint256)",
-        "function approve(address spender, uint256 amount) returns (bool)",
-        "function decimals() view returns (uint8)"
-      ], this.wallet);
+        // ERC20 helper
+        const ERC20 = new Contract(tokenAddress, [
+          "function balanceOf(address owner) view returns (uint256)",
+          "function allowance(address owner, address spender) view returns (uint256)",
+          "function approve(address spender, uint256 amount) returns (bool)",
+          "function decimals() view returns (uint8)"
+        ], this.wallet);
 
-      let balance: BigInt = await ERC20.balanceOf(taker);
-      if (balance === 0n) {
-        logger.warn(`No token balance to sell for, ${tokenAddress}, Adding fake balance`);
-
-        //This is just for now
-        balance = 1n * 100000000000000000n;
-
-        // // remove position anyway
-        // this.activePositions.delete(position.tokenCA.toLowerCase());
-        // this.pendingSellingTokens.delete(position.entryTxHash)
-        // return;
-      }
-
-      logger.info(`Preparing sell for full balance for ${tokenAddress}`);
-
-      const params = new URLSearchParams({
-        sellToken: tokenAddress,
-        buyToken: monitoringService.NATIVE_TOKEN_TRADES,
-        sellAmount: balance.toString(),
-        taker,
-      });
-
-      const quoteUrl = `${this.QUICKNODE_RPC}/addon/1117/swap/allowance-holder/quote?chainId=56&${params.toString()}`;
-      const quoteRes = await axios.get(quoteUrl, { timeout: 15000 }).catch((e) => {
-        throw new Error("0x sell quote failed: " + ((e as any).response?.data?.reason || (e as any).message || e));
-      });
-      const quote = quoteRes.data;
-      if (!quote || !quote.liquidityAvailable) {
-        logger.info(`quote link: ${quoteUrl}`)
-        logger.info(`Invalid 0x sell quote: ${quote}`);
-        this.pendingSellingTokens.delete(position.entryTxHash);
-        return null;
-      }
-
-      if (quote.allowanceTarget) {
-        // allowance is bigint in ethers v6
-        const allowance: BigInt = await ERC20.allowance(taker, quote.allowanceTarget);
-
-        if (allowance < balance) {
-          logger.info("Approving allowanceTarget for sell");
-
-          // approve expects bigint for amount (v6)
-          const approveTx = await ERC20.approve(quote.allowanceTarget, balance);
-
-          logger.info("Approve tx sent - waiting 1 conf");
-
-          await approveTx.wait(1);
-
-          logger.info("Approve confirmed");
-        } else {
-          logger.debug("Sufficient allowance present for allowanceTarget");
+        let balance: BigInt = await ERC20.balanceOf(taker);
+        if (balance === 0n) {
+          logger.warn(`No token balance to sell for ${tokenAddress}`);
+          balance = 1n * 100000000000000000n; // Temporary for testing
         }
-      }
 
-      txReq = await this.buildTxFromQuote(quote, taker);
+        logger.info(`Preparing sell for full balance for ${tokenAddress}`);
 
-      logger.info(`SELL ORDER for ${position.tokenName}: ${txReq}`);
-      this.pendingSellingTokens.delete(position.entryTxHash)
+        // Get best quote from both providers
+        const result = await this.aggregator.getBestQuote({
+          sellToken: tokenAddress,
+          buyToken: monitoringService.NATIVE_TOKEN_TRADES, // WBNB
+          sellAmount: balance.toString(),
+          taker,
+          slippage: '1',
+        });
+
+        if (!result) {
+          logger.info(`No valid quotes available for sell`);
+          this.pendingSellingTokens.delete(position.entryTxHash);
+          return null;
+        }
+
+        // Handle approval if needed
+        const allowanceTarget = result.bestQuote.allowanceTarget;
+        if (allowanceTarget) {
+          const allowance: BigInt = await ERC20.allowance(taker, allowanceTarget);
+
+          if (allowance < balance) {
+            logger.info(`Approving ${result.bestQuote.provider} allowanceTarget for sell`);
+            const approveTx = await ERC20.approve(allowanceTarget, balance);
+            logger.info("Approve tx sent - waiting 1 conf");
+            await approveTx.wait(1);
+            logger.info("Approve confirmed");
+          } else {
+            logger.debug("Sufficient allowance present for allowanceTarget");
+          }
+        }
+
+        // Build transaction from best quote
+        txReq = await this.aggregator.buildTxFromQuote(
+          result.bestQuote.quote,
+          taker
+        );
+
+        logger.info(`✅ SELL ORDER for ${position.tokenName} using ${result.bestQuote.provider}`);
+        this.pendingSellingTokens.delete(position.entryTxHash);
+        
       } catch (error) {
         this.pendingSellingTokens.delete(position.entryTxHash);
         logger.error("❌ Error executing sell order:", error);
