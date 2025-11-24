@@ -5,6 +5,7 @@ import binanceApi from '../services/binanceApi';
 import { formatedInterval } from '../utils/helpers';
 import logger from '../utils/logger';
 import axios from 'axios';
+import openOceanApi from '../services/openOceanApi';
 
 export class MonitoringController {
 
@@ -123,6 +124,22 @@ export class MonitoringController {
       res.status(500).json({
         success: false,
         error: 'Failed to fetch kline data'
+      });
+    }
+  }
+
+  async getTokenList(req: Request, res: Response) {
+    try {
+      const tokenList = await openOceanApi.getTokenList();
+      res.json({
+        success: true,
+        data: tokenList
+      });
+    } catch (error) {
+      logger.error('Error getting token list:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Failed to fetch token list'
       });
     }
   }

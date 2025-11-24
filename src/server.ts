@@ -32,6 +32,7 @@ app.get('/', (req, res) => {
       stats: '/api/stats',
       kline: '/api/kline',
       token: {
+        list: '/api/token/list',
         details: '/api/token/:address/details',
         analysis: '/api/token/:address/analysis',
         marketDynamics: '/api/token/:address/market-dynamics',
@@ -92,6 +93,7 @@ app.post('/api/binance/auth', monitoringController.updateBinanceAuth);
 app.get('/api/alerts', monitoringController.getAlerts);
 app.get('/api/stats', monitoringController.getStats);
 app.get('/api/kline', monitoringController.getKlineData);
+app.get('/api/token/list', monitoringController.getTokenList);
 app.get('/api/token/:address/details', monitoringController.getTokenDetails);
 app.get('/api/token/:address/market-dynamics', monitoringController.getTokenMarketDynamics);
 app.get('/api/token/:address/analysis', monitoringController.getTokenAnalysis);
