@@ -1,11 +1,11 @@
 import express from 'express';
 import cors from 'cors';
-import crypto from "crypto";
-import { exec } from "child_process";
 import dotenv from 'dotenv';
 import monitoringController from './controllers/monitoringController';
 import monitoringService from './services/monitoringService';
 import logger from './utils/logger';
+import tokenController from './controllers/tokenController';
+import binanceController from './controllers/binanceController';
 
 // Load environment variables
 dotenv.config();
@@ -52,7 +52,6 @@ app.get('/', (req, res) => {
         closed: '/api/closed-positions',
       },
       walletBalance: '/api/wallet-balance',
-      webhook: '/github/webhook',
       control: {
         start: '/api/monitoring/start',
         stop: '/api/monitoring/stop'
@@ -70,47 +69,32 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-//Github Automation
-app.post("/github/webhook", (req, res) => {
-  const sig = req.headers["x-hub-signature-256"];
-  const hmac = crypto.createHmac("sha256", SECRET);
-  const digest = "sha256=" + hmac.update(JSON.stringify(req.body)).digest("hex");
+//binance services
+app.post('/api/binance/auth', binanceController.updateBinanceAuth);
+app.get('/api/kline', binanceController.getKlineData);
+app.get('/api/trending', binanceController.getTrendingTokens);
+app.get('/api/smart-money', binanceController.getSmartMoneyActivity);
+app.get('/api/kol', binanceController.getKOLActivity);
+app.get('/api/following', binanceController.getFollowingActivity);
+app.get('/api/social-tweets', binanceController.getSocialTweets);
+app.get('/api/wallet-balance', binanceController.getWalletBalance);
 
-  if (sig !== digest) {
-    return res.status(401).send("Invalid signature");
-  }
-
-  exec("/home/aks_freelance12/deploy.sh", (error, stdout, stderr) => {
-    if (error) {
-      console.error(`❌ Deployment error: ${error.message}`);
-      return res.status(500).send("Deployment failed");
-    }
-    logger.info(`✅ Deployment output:\n${stdout}`);
-    res.status(200).send("Deployed successfully");
-  });
-});
-
-app.post('/api/binance/auth', monitoringController.updateBinanceAuth);
+//monitoring services
 app.get('/api/alerts', monitoringController.getAlerts);
 app.get('/api/stats', monitoringController.getStats);
-app.get('/api/kline', monitoringController.getKlineData);
-app.get('/api/token/list', monitoringController.getTokenList);
-app.get('/api/token/:address/token-position', monitoringController.getTokenPosition);
-app.get('/api/token/:address/details', monitoringController.getTokenDetails);
-app.get('/api/token/:address/market-dynamics', monitoringController.getTokenMarketDynamics);
-app.get('/api/token/:address/analysis', monitoringController.getTokenAnalysis);
-app.get('/api/token-icon', monitoringController.getTokenIcon);
-app.get('/api/trending', monitoringController.getTrendingTokens);
-app.get('/api/smart-money', monitoringController.getSmartMoneyActivity);
-app.get('/api/kol', monitoringController.getKOLActivity);
-app.get('/api/following', monitoringController.getFollowingActivity);
-app.get('/api/social-tweets', monitoringController.getSocialTweets);
-app.get('/api/trade-stats/:address', monitoringController.getTradeStats);
 app.get('/api/positions', monitoringController.getActivePositions);
 app.get('/api/closed-positions', monitoringController.getClosedPositions);
-app.get('/api/wallet-balance', monitoringController.getWalletBalance);
 app.post('/api/monitoring/start', monitoringController.startMonitoring);
 app.post('/api/monitoring/stop', monitoringController.stopMonitoring);
+app.get('/api/trade-stats/:address', monitoringController.getTradeStats);
+
+//token services
+app.get('/api/token/list', tokenController.getTokenList);
+app.get('/api/token/:address/token-position', tokenController.getTokenPosition);
+app.get('/api/token/:address/details', tokenController.getTokenDetails);
+app.get('/api/token/:address/market-dynamics', tokenController.getTokenMarketDynamics);
+app.get('/api/token/:address/analysis', tokenController.getTokenAnalysis);
+app.get('/api/token-icon', tokenController.getTokenIcon);
 
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
   logger.error('Unhandled error:');

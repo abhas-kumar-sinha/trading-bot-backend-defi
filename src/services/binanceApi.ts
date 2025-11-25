@@ -292,7 +292,6 @@ class BinanceApiService {
     }
   }
   
-
   async getTokenDetails(contractAddress: string): Promise<any> {
     try {
       const response = await this.axiosInstance.get(

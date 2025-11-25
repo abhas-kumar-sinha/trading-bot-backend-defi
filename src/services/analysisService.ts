@@ -91,7 +91,7 @@ class AnalysisService {
           };
 
           // restore in-memory map
-          this.activePositions.set(position.tokenCA.toLowerCase(), position);
+          this.activePositions.set(position.entryTxHash, position);
 
           logger.info(`🔁 Restored position: ${position.tokenSymbol} (${position.tokenCA})`);
 
@@ -118,10 +118,6 @@ class AnalysisService {
     logger.info(`Updated trending tokens cache with ${trendingTokens.length} tokens`);
   }
 
-  /**
-   * Primary analysis for FOLLOWING wallet transactions
-   * This is the main buy signal
-   */
   analyzeFollowingTransaction(transaction: SmartMoneyTransaction): MonitoringAlert | null {
     const txValue = parseFloat(transaction.txUsdValue);
     const marketCap = parseFloat(transaction.marketCap);
@@ -148,7 +144,7 @@ class AnalysisService {
       };
     } else if (isSell && timePassed < 30) {
       // Check if we have an active position for this token
-      const position = this.activePositions.get(transaction.ca.toLowerCase());
+      const position = this.activePositions.get(transaction.txHash);
       
       if (position && position.walletAddress === transaction.address) {
         // The wallet we followed is selling - create sell signal
@@ -171,17 +167,12 @@ class AnalysisService {
     return null;
   }
 
-  /**
-   * Secondary analysis for smart money/KOL/Following transactions
-   * Used only for confirmation and profit target adjustment
-   */
   analyzeSmartMoneyForConfirmation(transaction: SmartMoneyTransaction, type: 'SMART_MONEY' | 'KOL' | 'FOLLOWING'): void {
     const isBuy = transaction.tradeSideCategory === 11 || transaction.tradeSideCategory === 19;
     
     if (!isBuy) return;
 
-    const tokenCA = transaction.ca.toLowerCase();
-    const position = this.activePositions.get(tokenCA);
+    const position = this.activePositions.get(transaction.txHash);
 
     // If we have an active position and smart money/KOL/following is buying after us
     if (position && !position.smartMoneyConfirmation) {
@@ -199,10 +190,6 @@ class AnalysisService {
     }
   }
 
-  /**
-   * Active Position monitoring
-   * Used for reseting the smart money confirmation
-   */
   monitorPosition(position: TradePositionExtended): void {
     const entryTimeMs = position.entryTimestamp;
     const now = Date.now();
@@ -221,7 +208,6 @@ class AnalysisService {
     
     
   }
-
 
   async updatePositionMetadataToDb(position: TradePositionExtended): Promise<void> {
     try {
@@ -268,9 +254,6 @@ class AnalysisService {
     }
   }
 
-  /**
-   * Execute buy order (semi-dummy implementation)
-   */
   async executeBuyOrder(transaction: SmartMoneyTransaction): Promise<TradePositionExtended | null> {
     try {
 
@@ -372,7 +355,7 @@ class AnalysisService {
       };
 
       // Store position
-      this.activePositions.set(transaction.ca.toLowerCase(), position);
+      this.activePositions.set(transaction.txHash, position);
 
       // Save to database (implement your DB logic)
       await this.savePositionToDB(position);
@@ -387,9 +370,6 @@ class AnalysisService {
     }
   }
 
-  /**
-   * Check if position should be sold
-   */
   async checkSellConditions(position: TradePositionExtended, currentPrice: number, currentMarketCap: number): Promise<{ shouldSell: boolean; reason: string } | null> {
     logger.info(`✅🪲Checking sell conditions for ${position.tokenSymbol}`);
     const priceChange = ((currentPrice - position.entryPrice) / position.entryPrice) * 100;
@@ -406,9 +386,6 @@ class AnalysisService {
     return null;
   }
 
-  /**
-   * Execute sell order (dummy implementation)
-   */
   async executeSellOrder(position: TradePositionExtended, reason: string): Promise<void> {
     try {
 
@@ -522,7 +499,7 @@ class AnalysisService {
       await this.saveSellToDB(sellRecord);
 
       // Remove from active positions
-      this.activePositions.delete(position.tokenCA.toLowerCase());
+      this.activePositions.delete(position.entryTxHash);
       monitoringService.disconnectWebSocket(position.tokenCA);
       monitoringService.purchasedTokens.delete(position.tokenCA.toLowerCase());
 
@@ -533,9 +510,6 @@ class AnalysisService {
     }
   }
 
-  /**
-   * Generate token analysis for a specific contract address
-   */
   generateTokenAnalysis(
     contractAddress: string,
     smartMoneyTxs: SmartMoneyTransaction[],
@@ -603,9 +577,22 @@ class AnalysisService {
     };
   }
 
-  getPosition(tokenCA: string): TradePositionExtended | undefined {
-    return this.activePositions.get(tokenCA.toLowerCase());
+  getPosition(entryTxHash: string): TradePositionExtended | undefined {
+    return this.activePositions.get(entryTxHash);
   }
+
+  getPositionByTokenCA(tokenCA: string): TradePositionExtended | undefined {
+    tokenCA = tokenCA.toLowerCase();
+
+    for (const position of this.activePositions.values()) {
+      if (position.tokenCA.toLowerCase() === tokenCA) {
+        return position;
+      }
+    }
+
+    return undefined;
+  }
+
 
   async getTokenPosition(address: string): Promise<TradePositionExtended[] | undefined> {
     const closedPositions = await this.getClosedPositions();
@@ -719,7 +706,6 @@ class AnalysisService {
     }
   }
 
-  // Update same record with sell data
   private async saveSellToDB(sellRecord: TradePositionExtended): Promise<void> {
     try {
       await this.ensureDBReady();
@@ -763,8 +749,6 @@ class AnalysisService {
       logger.error("❌ Error updating sell record:", err);
     }
   }
-
-
 }
 
 export default new AnalysisService();

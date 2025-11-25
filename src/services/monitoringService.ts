@@ -49,7 +49,6 @@ class MonitoringService {
     this.isRunning = true;
     logger.info('🚀 Starting crypto monitoring service with WebSocket price tracking...');
 
-    // Ensure positions are synced from DB and populate purchasedTokens set
     await analysisService.ensurePositionDbSync();
     const activePositions = analysisService.getActivePositions();
     
@@ -71,9 +70,6 @@ class MonitoringService {
 
     // Immediate first fetch
     this.performMonitoringCycle();
-
-    // Immediate position monitor
-    this.monitorPositions()
 
     // Primary monitoring: Following wallets every 2 second
     cron.schedule('*/2 * * * * *', () => {
@@ -127,7 +123,7 @@ class MonitoringService {
   }
 
   /**
-   * Primary monitoring: Following wallets (every 1 second)
+   * Primary monitoring: Following wallets (every 2 second)
    */
   private async monitorFollowingWallets(): Promise<void> {
     try {
@@ -178,7 +174,7 @@ class MonitoringService {
           }
           // Execute sell order and close WebSocket
           else if (alert.type === 'FOLLOWING_SELL') {
-            const position = analysisService.getPosition(transaction.ca);
+            const position = analysisService.getPositionByTokenCA(transaction.txHash);
             if (position) {
               await analysisService.executeSellOrder(
                 position,
@@ -270,7 +266,7 @@ class MonitoringService {
       logger.warn(`🔌 WebSocket closed for ${tokenSymbol}`);
       
       // Attempt reconnection if position is still active
-      if (this.isRunning && analysisService.getPosition(tokenCA)) {
+      if (this.isRunning && analysisService.getPositionByTokenCA(tokenCA)) {
         this.handleReconnection(connection);
       } else {
         this.activeWebSockets.delete(lowerCA);
@@ -295,7 +291,7 @@ class MonitoringService {
       }
 
       // Get the active position
-      const position = analysisService.getPosition(connection.tokenCA);
+      const position = analysisService.getPositionByTokenCA(connection.tokenCA);
       if (!position) {
         logger.warn(`No active position found for ${connection.tokenSymbol}, closing WebSocket`);
         this.disconnectWebSocket(connection.tokenCA);
@@ -497,6 +493,7 @@ class MonitoringService {
   private async performMonitoringCycle(): Promise<void> {
     await this.monitorFollowingWallets();
     await this.monitorSmartMoneyAndKOL();
+    this.monitorPositions()
   }
 
   private monitorPositions(): void {
@@ -590,7 +587,7 @@ class MonitoringService {
       maxPositions: this.MAX_OPEN_POSITIONS,
       stopLossPercentage: this.STOP_LOSS_PERCENTAGE,
       positions: activePositions.map(p => {
-        const conn = this.activeWebSockets.get(p.tokenCA.toLowerCase());
+        const conn = this.activeWebSockets.get(p.entryTxHash);
         const profitPercentage = conn?.lastPrice 
           ? ((conn.lastPrice - p.entryPrice) / p.entryPrice) * 100 
           : null;
