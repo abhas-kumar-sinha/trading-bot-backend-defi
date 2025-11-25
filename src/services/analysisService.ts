@@ -234,6 +234,17 @@ class AnalysisService {
     }
   }
 
+  async updateTokenCurrentPriceToDb(position: TradePositionExtended): Promise<void> {
+    try {
+      await pool.query(
+        `UPDATE trades SET tokendetails = $1 WHERE tokenca = $2;`,
+        [position.tokenDetails, position.tokenCA]
+      );
+    } catch (err) {
+      logger.error("❌ Error updating token current price:");
+    }
+  }
+
   private jsonObjectBigIntSafe<T>(value: T): T {
     return JSON.parse(
       JSON.stringify(value, (_key, val) =>
@@ -341,6 +352,8 @@ class AnalysisService {
         holdersInfluencersPercent: parseFloat(currentMarketDynamics.holdersInfluencersPercent),
         tokenHigh: 0,
         tokenLow: 0,
+        currentChange: 0,
+        changeTime: Math.floor(Date.now() / 1000)
       };
 
       const position: TradePositionExtended = {
@@ -510,6 +523,8 @@ class AnalysisService {
 
       // Remove from active positions
       this.activePositions.delete(position.tokenCA.toLowerCase());
+      monitoringService.disconnectWebSocket(position.tokenCA);
+      monitoringService.purchasedTokens.delete(position.tokenCA.toLowerCase());
 
       logger.info(`💸 SELL ORDER EXECUTED: ${position.tokenSymbol} at $${currentPrice} (${priceChange.toFixed(2)}% P/L) - Reason: ${reason}`);
     } catch (error) {
@@ -588,6 +603,10 @@ class AnalysisService {
     };
   }
 
+  getPosition(tokenCA: string): TradePositionExtended | undefined {
+    return this.activePositions.get(tokenCA.toLowerCase());
+  }
+
   async getTokenPosition(address: string): Promise<TradePositionExtended[] | undefined> {
     const closedPositions = await this.getClosedPositions();
     const allPositions = [...this.activePositions.values(), ...closedPositions];
@@ -599,10 +618,6 @@ class AnalysisService {
 
   getActivePositions(): TradePositionExtended[] {
     return Array.from(this.activePositions.values());
-  }
-
-  getPosition(tokenCA: string): TradePositionExtended | undefined {
-    return this.activePositions.get(tokenCA.toLowerCase());
   }
 
   async getClosedPositions(): Promise<TradePositionExtended[]> {
@@ -722,6 +737,7 @@ class AnalysisService {
            exitReason = $9,
            profitLoss = $10
          WHERE entryTxHash = $11
+         AND exitTimestamp IS NULL
          RETURNING tokenSymbol;`,
         [
           JSON.stringify(sellRecord.tokenDetails),

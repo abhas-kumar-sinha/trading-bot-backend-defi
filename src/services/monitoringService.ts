@@ -33,7 +33,7 @@ class MonitoringService {
   private processedTxHashes: Set<string> = new Set();
   
   // Track tokens we've already bought (to prevent duplicate buys)
-  private purchasedTokens: Set<string> = new Set();
+  public purchasedTokens: Set<string> = new Set();
   
   // WebSocket connections for active positions
   public activeWebSockets: Map<string, WebSocketConnection> = new Map();
@@ -184,8 +184,6 @@ class MonitoringService {
                 position,
                 'WALLET_SOLD'
               );
-              this.disconnectWebSocket(transaction.ca);
-              this.purchasedTokens.delete(transaction.ca.toLowerCase());
             }
           }
         }
@@ -317,6 +315,14 @@ class MonitoringService {
         }
       }
 
+      const currentTime = Math.floor(Date.now() / 1000)
+
+      if (currentTime - (position.tokenDetails.changeTime ?? 0) > 10 || (position.tokenDetails.changeTime ?? 0) === 0) {
+        position.tokenDetails.changeTime = currentTime;
+        position.tokenDetails.currentChange = profitPercentage;
+        analysisService.updateTokenCurrentPriceToDb(position);
+      }
+
       // Estimate market cap based on price change
       const priceChangeRatio = currentPrice / position.entryPrice;
       const estimatedMarketCap = position.entryMarketCap * priceChangeRatio;
@@ -348,8 +354,6 @@ class MonitoringService {
         };
         this.addAlert(alert);
 
-        this.disconnectWebSocket(connection.tokenCA);
-        this.purchasedTokens.delete(connection.tokenCA.toLowerCase());
         return;
       }
 
@@ -386,8 +390,6 @@ class MonitoringService {
         };
         this.addAlert(alert);
 
-        this.disconnectWebSocket(connection.tokenCA);
-        this.purchasedTokens.delete(connection.tokenCA.toLowerCase());
       } else {
         // Log current position status (only if price changed significantly)
         if (connection.lastPrice !== null) {
@@ -409,7 +411,7 @@ class MonitoringService {
   /**
    * Disconnect WebSocket for a specific token
    */
-  private disconnectWebSocket(tokenCA: string): void {
+  public disconnectWebSocket(tokenCA: string): void {
     const lowerCA = tokenCA.toLowerCase();
     const connection = this.activeWebSockets.get(lowerCA);
     
