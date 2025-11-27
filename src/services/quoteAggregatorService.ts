@@ -16,12 +16,15 @@ interface QuoteResult {
   sellAmount: string;
   estimatedGas?: string;
   allowanceTarget?: string;
+  gasPrice?: string;
+  netValue?: string; // Net value after subtracting gas costs
 }
 
 interface AggregatedQuoteResult {
   bestQuote: QuoteResult;
   allQuotes: QuoteResult[];
-  savings?: string; // how much better the best quote is
+  savings?: string;
+  savingsType?: 'buyAmount' | 'netValue'; // Indicates what type of savings
 }
 
 class QuoteAggregator {
@@ -29,6 +32,9 @@ class QuoteAggregator {
   private ONEINCH_API_KEY: string;
   private CHAIN_ID = 56;
   private ONEINCH_BASE_URL = `https://api.1inch.dev/swap/v6.1/${this.CHAIN_ID}`;
+
+  // Gas price for calculations (0.8 gwei = 800000000 wei)
+  private readonly GAS_PRICE_WEI = 800000000n;
 
   constructor(quicknodeRpc: string, oneInchApiKey: string) {
     this.QUICKNODE_RPC = quicknodeRpc;
@@ -58,13 +64,17 @@ class QuoteAggregator {
         return null;
       }
 
+      const estimatedGas = quote.transaction?.gas || '500000';
+      const gasPrice = quote.transaction?.gasPrice || this.GAS_PRICE_WEI.toString();
+
       return {
         provider: '0x',
         quote: quote,
         buyAmount: quote.buyAmount || '0',
         sellAmount: quote.sellAmount || params.sellAmount,
-        estimatedGas: quote.transaction.gas,
-        allowanceTarget: quote.allowanceTarget || quote.transaction.to,
+        estimatedGas,
+        gasPrice,
+        allowanceTarget: quote.allowanceTarget || quote.transaction?.to,
       };
     } catch (error: any) {
       logger.error(`0x quote failed: ${error.response?.data?.reason || error.message}`);
@@ -131,13 +141,17 @@ class QuoteAggregator {
 
       const swapData = swapResponse.data;
 
+      const estimatedGas = swapData.tx?.gas || '500000';
+      const gasPrice = swapData.tx?.gasPrice || this.GAS_PRICE_WEI.toString();
+
       return {
         provider: '1inch',
         quote: swapData,
         buyAmount: swapData.dstAmount || quote.dstAmount,
         sellAmount: params.sellAmount,
-        estimatedGas: swapData.tx?.gas,
-        allowanceTarget: swapData.tx?.to, // 1inch router address
+        estimatedGas,
+        gasPrice,
+        allowanceTarget: swapData.tx?.to,
       };
     } catch (error: any) {
       logger.error(`1inch quote failed: ${error.response?.data?.description || error.message}`);
@@ -146,21 +160,59 @@ class QuoteAggregator {
   }
 
   /**
-   * Compares two quotes and returns the better one
+   * Calculate net value after gas costs
+   * For buying: netValue = buyAmount - gasCost (in buy token terms)
+   * For selling: netValue = buyAmount - gasCost (already in native token)
    */
-  private compareBuyAmounts(amount1: string, amount2: string): number {
-    const bn1 = BigInt(amount1);
-    const bn2 = BigInt(amount2);
-    if (bn1 > bn2) return 1;
-    if (bn1 < bn2) return -1;
+  private calculateNetValue(
+    quote: QuoteResult,
+    isBuyingNative: boolean
+  ): string {
+    const buyAmount = BigInt(quote.buyAmount);
+    const gasLimit = BigInt(quote.estimatedGas || '500000');
+    const gasPrice = BigInt(quote.gasPrice || this.GAS_PRICE_WEI.toString());
+    const gasCost = gasLimit * gasPrice;
+
+    if (isBuyingNative) {
+      // When buying native token (selling), subtract gas cost directly
+      const netValue = buyAmount - gasCost;
+      return netValue > 0n ? netValue.toString() : '0';
+    } else {
+      // When buying tokens (selling native), gas cost is in native token
+      // We can't directly subtract from buyAmount (different token)
+      // Return buyAmount as netValue for token purchases
+      // Gas cost will be paid separately from wallet balance
+      return buyAmount.toString();
+    }
+  }
+
+  /**
+   * Compares two quotes and returns comparison result
+   * Returns: 1 if quote1 is better, -1 if quote2 is better, 0 if equal
+   */
+  private compareQuotes(
+    quote1: QuoteResult,
+    quote2: QuoteResult,
+    isBuyingNative: boolean
+  ): number {
+    const netValue1 = BigInt(quote1.netValue || quote1.buyAmount);
+    const netValue2 = BigInt(quote2.netValue || quote2.buyAmount);
+
+    if (netValue1 > netValue2) return 1;
+    if (netValue1 < netValue2) return -1;
     return 0;
   }
 
   /**
    * Main function to get best quote from both providers
+   * Now considers net value after gas costs for better comparison
    */
   async getBestQuote(params: QuoteParams): Promise<AggregatedQuoteResult | null> {
     logger.info(`🔍 Fetching quotes from 0x and 1inch...`);
+
+    // Determine if we're buying native token (for net value calculation)
+    const isBuyingNative = params.buyToken === '0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c' ||
+                           params.buyToken === '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE';
 
     // Fetch quotes in parallel
     const [zeroXQuote, oneInchQuote] = await Promise.all([
@@ -169,45 +221,68 @@ class QuoteAggregator {
     ]);
 
     const validQuotes: QuoteResult[] = [];
-    if (zeroXQuote) validQuotes.push(zeroXQuote);
-    if (oneInchQuote) validQuotes.push(oneInchQuote);
+    
+    if (zeroXQuote) {
+      zeroXQuote.netValue = this.calculateNetValue(zeroXQuote, isBuyingNative);
+      validQuotes.push(zeroXQuote);
+    }
+    
+    if (oneInchQuote) {
+      oneInchQuote.netValue = this.calculateNetValue(oneInchQuote, isBuyingNative);
+      validQuotes.push(oneInchQuote);
+    }
 
     if (validQuotes.length === 0) {
       logger.error('❌ No valid quotes from any provider');
       return null;
     }
 
-    // Sort by buyAmount (descending - higher is better)
-    validQuotes.sort((a, b) => this.compareBuyAmounts(b.buyAmount, a.buyAmount));
+    // Sort by net value (descending - higher is better)
+    validQuotes.sort((a, b) => this.compareQuotes(b, a, isBuyingNative));
 
     const bestQuote = validQuotes[0];
     const worstQuote = validQuotes[validQuotes.length - 1];
 
-    // Calculate savings if we have multiple quotes
+    // Calculate savings based on net value
     let savings: string | undefined;
+    let savingsType: 'buyAmount' | 'netValue' = 'netValue';
+    
     if (validQuotes.length > 1) {
-      const bestAmount = BigInt(bestQuote.buyAmount);
-      const worstAmount = BigInt(worstQuote.buyAmount);
-      const diff = bestAmount - worstAmount;
-      const percentage = (Number(diff) / Number(worstAmount)) * 100;
-      savings = percentage.toFixed(2);
+      const bestNetValue = BigInt(bestQuote.netValue || bestQuote.buyAmount);
+      const worstNetValue = BigInt(worstQuote.netValue || worstQuote.buyAmount);
+      
+      if (worstNetValue > 0n) {
+        const diff = bestNetValue - worstNetValue;
+        const percentage = (Number(diff) * 100) / Number(worstNetValue);
+        savings = percentage.toFixed(4);
+      }
     }
 
     logger.info(`✅ Best quote from ${bestQuote.provider}`);
     logger.info(`   Buy amount: ${bestQuote.buyAmount}`);
+    logger.info(`   Net value (after gas): ${bestQuote.netValue}`);
+    logger.info(`   Estimated gas: ${bestQuote.estimatedGas}`);
+    
     if (savings) {
-      logger.info(`   💰 Savings: ${savings}% better than ${worstQuote.provider}`);
+      logger.info(`   💰 Savings: ${savings}% better than ${worstQuote.provider} (net value comparison)`);
     }
 
-    // Log all quotes for comparison
+    // Log detailed comparison
     validQuotes.forEach((q, idx) => {
-      logger.info(`   ${idx + 1}. ${q.provider}: ${q.buyAmount} (gas: ${q.estimatedGas || 'N/A'})`);
+      const gasCost = BigInt(q.estimatedGas || '500000') * BigInt(q.gasPrice || this.GAS_PRICE_WEI.toString());
+      const gasCostEth = Number(gasCost) / 1e18;
+      
+      logger.info(`   ${idx + 1}. ${q.provider}:`);
+      logger.info(`      • Buy amount: ${q.buyAmount}`);
+      logger.info(`      • Gas: ${q.estimatedGas} (${gasCostEth.toFixed(6)} BNB)`);
+      logger.info(`      • Net value: ${q.netValue}`);
     });
 
     return {
       bestQuote,
       allQuotes: validQuotes,
       savings,
+      savingsType,
     };
   }
 
@@ -215,7 +290,6 @@ class QuoteAggregator {
    * Helper method to build transaction from the best quote
    */
   async buildTxFromQuote(quote: any, taker: string): Promise<any> {
-    // The quote structure will depend on the provider
     if (!quote) {
       throw new Error('No quote provided');
     }
@@ -243,6 +317,28 @@ class QuoteAggregator {
     }
 
     throw new Error('Invalid quote format');
+  }
+
+  /**
+   * Get detailed cost breakdown for a quote
+   */
+  getQuoteCostBreakdown(quote: QuoteResult): {
+    buyAmount: string;
+    gasCost: string;
+    gasCostBNB: string;
+    netValue: string;
+    provider: string;
+  } {
+    const gasCost = BigInt(quote.estimatedGas || '500000') * BigInt(quote.gasPrice || this.GAS_PRICE_WEI.toString());
+    const gasCostBNB = (Number(gasCost) / 1e18).toFixed(6);
+
+    return {
+      buyAmount: quote.buyAmount,
+      gasCost: gasCost.toString(),
+      gasCostBNB,
+      netValue: quote.netValue || quote.buyAmount,
+      provider: quote.provider,
+    };
   }
 }
 

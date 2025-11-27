@@ -4,6 +4,7 @@ import binanceApi from './binanceApi';
 import analysisService from './analysisService';
 import { MonitoringAlert, SmartMoneyTransaction, TrendingToken } from '../types/index';
 import logger from '../utils/logger';
+import { TokenSwapService } from './tokenSwapService';
 
 interface WebSocketConnection {
   ws: WebSocket;
@@ -22,7 +23,7 @@ class MonitoringService {
   private readonly RECONNECT_DELAY = 5000;
   private readonly MAX_OPEN_POSITIONS = 5; // Maximum number of concurrent positions
   private readonly STOP_LOSS_PERCENTAGE = -20; // Stop loss at -20%
-  private readonly SMART_STOP_LOSS_PERCENTAGE = -40; // Smart money stop loss at -40%
+  private readonly SMART_STOP_LOSS_PERCENTAGE = -35; // Smart money stop loss at -35%
   public readonly NATIVE_TOKEN_TRADES: string = "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE";
   public readonly NATIVE_TOKEN_DATA: string = "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c";
   
@@ -39,6 +40,8 @@ class MonitoringService {
   public activeWebSockets: Map<string, WebSocketConnection> = new Map();
   private readonly SINTRAL_WS_URL = process.env.SINTRAL_WS_URL || 'wss://nbstream.binance.com/w3w/stream';
   private readonly KLINE_INTERVAL = '1s';
+
+  private tokenSwapService: TokenSwapService;
 
   async start(): Promise<void> {
     if (this.isRunning) {
@@ -70,6 +73,9 @@ class MonitoringService {
 
     // Immediate first fetch
     this.performMonitoringCycle();
+
+    // Initialize token swap service
+    this.tokenSwapService = new TokenSwapService();
 
     // Primary monitoring: Following wallets every 2 second
     cron.schedule('*/2 * * * * *', () => {
@@ -161,7 +167,7 @@ class MonitoringService {
               continue;
             }
             
-            const position = await analysisService.executeBuyOrder(transaction);
+            const position = await this.tokenSwapService.executeBuyOrder(transaction);
             if (position) {
               this.purchasedTokens.add(tokenCALower);
               this.connectWebSocket(position.tokenCA, position.tokenSymbol);
@@ -176,7 +182,7 @@ class MonitoringService {
           else if (alert.type === 'FOLLOWING_SELL') {
             const position = analysisService.getPositionByTokenCA(transaction.txHash);
             if (position) {
-              await analysisService.executeSellOrder(
+              await this.tokenSwapService.executeSellOrder(
                 position,
                 'WALLET_SOLD'
               );
@@ -329,7 +335,7 @@ class MonitoringService {
           `🛑 STOP LOSS triggered for ${connection.tokenSymbol}: ${profitPercentage.toFixed(2)}%`
         );
         
-        await analysisService.executeSellOrder(
+        await this.tokenSwapService.executeSellOrder(
           position,
           'STOP_LOSS'
         );
@@ -365,7 +371,7 @@ class MonitoringService {
           `🎯 Profit target met for ${connection.tokenSymbol}: ${profitPercentage.toFixed(2)}% - ${sellCheck.reason}`
         );
         
-        await analysisService.executeSellOrder(
+        await this.tokenSwapService.executeSellOrder(
           position,
           sellCheck.reason
         );
@@ -500,7 +506,26 @@ class MonitoringService {
     try {
       const positions = analysisService.getActivePositions();
       for (const position of positions) {
-        await analysisService.monitorPosition(position);
+        const entryTimeMs = position.entryTimestamp;
+        const now = Date.now();
+        const diffSec = Math.floor((now - entryTimeMs) / 1000);
+
+        logger.info(`checking position: ${position.tokenSymbol} - ${diffSec} seconds passed`)
+        
+        if (diffSec > analysisService.ANALYSIS_THRESHOLDS.SMARTMONEY_CONFIRMATION_TIMEOUT) {
+          position.smartMoneyConfirmation = false;
+          position.profitTarget = analysisService.ANALYSIS_THRESHOLDS.BASE_PROFIT_TARGET;
+          
+          analysisService.updatePositionMetadataToDb(position);
+          
+          logger.info(`✨ Smart money confirmation reset for ${position.tokenSymbol} - Profit target reset to ${position.profitTarget}%`);
+        }
+
+        if (diffSec > analysisService.ANALYSIS_THRESHOLDS.HOLD_DURATION_TIMEOUT) {
+          await this.tokenSwapService.executeSellOrder(position, 'HOLD_DURATION'); 
+          
+          logger.info(`✨ Hold duration for ${position.tokenSymbol} - Profit target reset to ${position.profitTarget}%`);
+        }
       }
     } catch (error) {
       logger.error('Error monitoring positions:', error);
