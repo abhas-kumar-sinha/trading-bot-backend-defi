@@ -41,7 +41,7 @@ class AnalysisService {
     BASE_PROFIT_TARGET: 10, // 10% base profit
     BOOSTED_PROFIT_TARGET: 15, // 15% with smart money confirmation
     SMARTMONEY_CONFIRMATION_TIMEOUT: 1 * 60 * 60, // 1 hour
-    HOLD_DURATION_TIMEOUT: 1.5 * 24 * 60 * 60, //24 hour
+    HOLD_DURATION_TIMEOUT: 5 * 60 * 60, //5 hour
   };
 
   constructor() {
