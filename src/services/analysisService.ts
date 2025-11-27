@@ -41,6 +41,7 @@ class AnalysisService {
     BASE_PROFIT_TARGET: 10, // 10% base profit
     BOOSTED_PROFIT_TARGET: 15, // 15% with smart money confirmation
     SMARTMONEY_CONFIRMATION_TIMEOUT: 1 * 60 * 60, // 1 hour
+    HOLD_DURATION_TIMEOUT: 1.5 * 24 * 60 * 60, //24 hour
   };
 
   constructor() {
@@ -190,7 +191,7 @@ class AnalysisService {
     }
   }
 
-  monitorPosition(position: TradePositionExtended): void {
+  async monitorPosition(position: TradePositionExtended): Promise<void> {
     const entryTimeMs = position.entryTimestamp;
     const now = Date.now();
     const diffSec = Math.floor((now - entryTimeMs) / 1000);
@@ -205,6 +206,13 @@ class AnalysisService {
       
       logger.info(`✨ Smart money confirmation reset for ${position.tokenSymbol} - Profit target reset to ${position.profitTarget}%`);
     }
+
+    if (diffSec > this.ANALYSIS_THRESHOLDS.HOLD_DURATION_TIMEOUT) {
+      await this.executeSellOrder(position, 'HOLD_DURATION'); 
+      
+      logger.info(`✨ Hold duration for ${position.tokenSymbol} - Profit target reset to ${position.profitTarget}%`);
+    }
+    
     
     
   }

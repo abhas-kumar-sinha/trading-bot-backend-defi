@@ -493,14 +493,14 @@ class MonitoringService {
   private async performMonitoringCycle(): Promise<void> {
     await this.monitorFollowingWallets();
     await this.monitorSmartMoneyAndKOL();
-    this.monitorPositions()
+    await this.monitorPositions()
   }
 
-  private monitorPositions(): void {
+  private async monitorPositions(): Promise<void> {
     try {
       const positions = analysisService.getActivePositions();
       for (const position of positions) {
-        analysisService.monitorPosition(position);
+        await analysisService.monitorPosition(position);
       }
     } catch (error) {
       logger.error('Error monitoring positions:', error);
