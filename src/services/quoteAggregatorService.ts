@@ -1,6 +1,8 @@
 import axios from 'axios';
 import logger from '../utils/logger';
 
+type QuoteSelection = "automatic" | "manual";
+
 interface QuoteParams {
   sellToken: string;
   buyToken: string;
@@ -315,6 +317,53 @@ class QuoteAggregator {
       savings,
       savingsType,
     };
+  }
+
+  /**
+   * Main function to get best quote from all providers
+   */
+  async getAllBestQuote(params: QuoteParams): Promise<QuoteResult[] | null> {
+    logger.info('🔍 Fetching quotes from 2 aggregators...');
+    logger.info('   Providers: 1inch, LiFi');
+    
+    const isBuyingNative = 
+      params.buyToken === this.WBNB_ADDRESS ||
+      params.buyToken === this.NATIVE_TOKEN_ONEINCH ||
+      params.buyToken?.toLowerCase() === '0x0000000000000000000000000000000000000000';
+    
+    // Fetch quotes in parallel with individual error handling
+    const [oneInchQuote, lifiQuote] = await Promise.allSettled([
+      this.get1inchQuote(params),
+      this.getLiFiQuote(params),
+    ]);
+    
+    const validQuotes: QuoteResult[] = [];
+    
+    // Process 1inch quote
+    if (oneInchQuote.status === 'fulfilled' && oneInchQuote.value) {
+      oneInchQuote.value.netValue = this.calculateNetValue(oneInchQuote.value, isBuyingNative);
+      validQuotes.push(oneInchQuote.value);
+      logger.info('✅ 1inch quote retrieved successfully');
+    } else {
+      logger.warn('⚠️  1inch quote failed or returned null');
+    }
+    
+    // Process LiFi quote
+    if (lifiQuote.status === 'fulfilled' && lifiQuote.value) {
+      lifiQuote.value.netValue = this.calculateNetValue(lifiQuote.value, isBuyingNative);
+      validQuotes.push(lifiQuote.value);
+      logger.info('✅ LiFi quote retrieved successfully');
+    } else {
+      logger.warn('⚠️  LiFi quote failed or returned null');
+    }
+    
+    if (validQuotes.length === 0) {
+      logger.error('❌ No valid quotes from any provider');
+      return null;
+    }
+    
+    logger.info(`✅ Retrieved ${validQuotes.length} valid quote(s)`);
+    return validQuotes;
   }
 
   /**

@@ -6,6 +6,7 @@ import monitoringService from './services/monitoringService';
 import logger from './utils/logger';
 import tokenController from './controllers/tokenController';
 import binanceController from './controllers/binanceController';
+import TradeController from './controllers/tradeController';
 
 // Load environment variables
 dotenv.config();
@@ -31,6 +32,9 @@ app.get('/', (req, res) => {
       alerts: '/api/alerts',
       stats: '/api/stats',
       kline: '/api/kline',
+      trade: {
+        quotes: '/api/trade/quotes',
+      },
       token: {
         list: '/api/token/list',
         position: '/api/token/:address/token-position',
@@ -95,6 +99,9 @@ app.get('/api/token/:address/details', tokenController.getTokenDetails);
 app.get('/api/token/:address/market-dynamics', tokenController.getTokenMarketDynamics);
 app.get('/api/token/:address/analysis', tokenController.getTokenAnalysis);
 app.get('/api/token-icon', tokenController.getTokenIcon);
+
+//trade services
+app.get('/api/trade/quotes', TradeController.getTradeQuotes);
 
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
   logger.error('Unhandled error:');

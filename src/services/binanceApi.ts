@@ -116,7 +116,6 @@ class BinanceApiService {
       );
 
       if (response.data.success) {
-        logger.info(`Fetched ${response.data.data.length} smart money transactions`);
         return response.data.data;
       }
       return [];
@@ -141,7 +140,6 @@ class BinanceApiService {
       );
 
       if (response.data.success) {
-        logger.info(`Fetched ${response.data.data.length} KOL transactions`);
         return response.data.data;
       }
       return [];
@@ -166,7 +164,6 @@ class BinanceApiService {
       );
 
       if (response.data.success) {
-        logger.info(`Fetched ${response.data.data.length} following transactions`);
         return response.data.data;
       }
       return [];
@@ -201,7 +198,6 @@ class BinanceApiService {
       );
 
       if (response.data.success) {
-        logger.info(`Fetched ${response.data.data.length} social tweets`);
         return response.data.data;
       }
       return [];
@@ -232,7 +228,6 @@ class BinanceApiService {
       );
 
       if (response.data.success) {
-        logger.info(`Fetched ${response.data.data.tokens.length} trending tokens`);
         return response.data.data.tokens;
       }
       return [];
@@ -257,7 +252,6 @@ class BinanceApiService {
       );
 
       if (response.data.success) {
-        logger.info(`Fetched ${response.data.data.length} smart money buy tokens`);
         return response.data.data;
       }
       return [];

@@ -210,7 +210,7 @@ class AnalysisService {
       buyRating += 1;
     }
 
-    if (parseFloat(volume24h) >= parseFloat(marketCap) * 0.25) {
+    if (parseFloat(volume24h) >= parseFloat(marketCap) * 0.30) {
       buyRating += 1;
     }
 
