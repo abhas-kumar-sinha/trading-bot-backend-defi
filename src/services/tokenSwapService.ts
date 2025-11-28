@@ -204,10 +204,7 @@ export class TokenSwapService {
             }
 
             // OPTIMIZED: Fast transaction execution with fixed gas
-            // const receipt = await this.sendAndWait(txReq, 60_000);
-            const receipt = {
-                hash: `testhash- ${new Date().getTime()}`
-            }
+            const receipt = await this.sendAndWait(txReq, 60_000);
 
             logger.info(`🎉 BUY EXECUTED: ${transaction.tokenName} - ${receipt.hash}`);
 
@@ -367,10 +364,7 @@ export class TokenSwapService {
             }
 
             // OPTIMIZED: Fast sell transaction with fixed gas
-            // const receipt = await this.sendAndWait(txReq, 60_000);
-            const receipt = {
-                hash: `testhash- ${new Date().getTime()}`
-            }
+            const receipt = await this.sendAndWait(txReq, 60_000);
 
             logger.info(`🎉 SELL EXECUTED: ${position.tokenName} - ${receipt.hash}`);
 
