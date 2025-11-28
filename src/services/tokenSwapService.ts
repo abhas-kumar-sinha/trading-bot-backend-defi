@@ -45,12 +45,6 @@ export class TokenSwapService {
         BASE_PROFIT_TARGET: 10,
     };
 
-    // OPTIMIZED GAS SETTINGS FOR BSC - MAXIMUM SPEED
-    // 0.8 gwei = 800000000 wei (not 800000000n gwei!)
-    private readonly FIXED_GAS_PRICE_WEI = 800000000n; // 0.8 gwei in wei
-    private readonly FIXED_GAS_LIMIT = 500000n; // Fixed gas limit
-    private readonly APPROVAL_GAS_LIMIT = 100000n; // Fixed gas for approvals
-
     constructor() {
         this.aggregator = new QuoteAggregator(this.ONEINCH_API_KEY);
         this.startRetryProcessor();
@@ -72,25 +66,13 @@ export class TokenSwapService {
     }
 
     /**
-     * OPTIMIZED: Ultra-fast transaction submission
-     * - Fixed gas price (0.8 gwei = 800000000 wei)
-     * - Fixed gas limit (500000)
-     * - No gas estimation
-     * - No validation delays
+     * Send and wait for transaction confirmation
+     * Uses default gas and gas price from the quote
      */
     private async sendAndWait(txRequest: TransactionRequest, timeoutMs = 60_000): Promise<TransactionReceipt> {
-        // CRITICAL: Override gas settings for speed
-        // Keep the original data and other params from aggregator
-        txRequest.gasPrice = this.FIXED_GAS_PRICE_WEI;
-        txRequest.gasLimit = this.FIXED_GAS_LIMIT;
-        
-        // Remove any maxFeePerGas/maxPriorityFeePerGas if present (BSC doesn't use EIP-1559)
-        delete (txRequest as any).maxFeePerGas;
-        delete (txRequest as any).maxPriorityFeePerGas;
+        logger.info(`📡 Submitting transaction with default gas settings`);
 
-        logger.info(`⚡ Fast tx: ${this.FIXED_GAS_PRICE_WEI} wei (0.8 gwei), limit: ${this.FIXED_GAS_LIMIT}`);
-
-        // Send transaction immediately
+        // Send transaction immediately with quote's default gas settings
         const signedTx = await this.wallet.sendTransaction(txRequest);
         const hash = signedTx.hash;
         logger.info(`📡 Broadcasted tx ${hash}`);
@@ -203,7 +185,7 @@ export class TokenSwapService {
                 throw new Error('Invalid transaction data from aggregator');
             }
 
-            // OPTIMIZED: Fast transaction execution with fixed gas
+            // Send transaction with default gas settings from quote
             const receipt = await this.sendAndWait(txReq, 60_000);
 
             logger.info(`🎉 BUY EXECUTED: ${transaction.tokenName} - ${receipt.hash}`);
@@ -324,7 +306,7 @@ export class TokenSwapService {
                 throw new Error("No valid quotes for sell");
             }
 
-            // OPTIMIZED: Fast approval with fixed gas
+            // Perform approval if needed
             const allowanceTarget = result.bestQuote.allowanceTarget;
             if (allowanceTarget) {
                 const allowance: bigint = await ERC20.allowance(taker, allowanceTarget);
@@ -332,11 +314,8 @@ export class TokenSwapService {
                 if (allowance < balance) {
                     logger.info(`🔓 Approving ${result.bestQuote.provider} to spend tokens`);
                     
-                    // Fast approval transaction with fixed gas
-                    const approveTx = await ERC20.approve(allowanceTarget, balance, {
-                        gasPrice: this.FIXED_GAS_PRICE_WEI,
-                        gasLimit: this.APPROVAL_GAS_LIMIT
-                    });
+                    // Approval transaction with default gas settings
+                    const approveTx = await ERC20.approve(allowanceTarget, balance);
                     
                     logger.info(`⏳ Approval tx sent: ${approveTx.hash}`);
                     const approvalReceipt = await approveTx.wait(1);
@@ -363,7 +342,7 @@ export class TokenSwapService {
                 throw new Error('Invalid transaction data from aggregator');
             }
 
-            // OPTIMIZED: Fast sell transaction with fixed gas
+            // Send transaction with default gas settings from quote
             const receipt = await this.sendAndWait(txReq, 60_000);
 
             logger.info(`🎉 SELL EXECUTED: ${position.tokenName} - ${receipt.hash}`);
