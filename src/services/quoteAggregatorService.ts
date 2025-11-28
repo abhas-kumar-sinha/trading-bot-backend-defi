@@ -35,20 +35,53 @@ class QuoteAggregator {
 
   // BSC native token representations
   private readonly WBNB_ADDRESS = '0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c';
-  private readonly NATIVE_TOKEN_ALT = '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE';
-  private readonly NATIVE_ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
+  // 1inch uses this standard address for native token on ALL chains
+  private readonly NATIVE_TOKEN_ONEINCH = '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE';
+  // LiFi uses null/undefined for native token
+  private readonly NATIVE_TOKEN_LIFI = null;
 
   constructor(oneInchApiKey: string) {
     this.ONEINCH_API_KEY = oneInchApiKey;
   }
 
   /**
+   * Normalize token address to 1inch format
+   * Returns the standard native token address if it's BNB
+   */
+  private normalize1inchToken(token: string): string {
+    if (
+      token === this.WBNB_ADDRESS ||
+      token === this.NATIVE_TOKEN_ONEINCH ||
+      token?.toLowerCase() === '0x0000000000000000000000000000000000000000'
+    ) {
+      return this.NATIVE_TOKEN_ONEINCH;
+    }
+    return token;
+  }
+
+  /**
+   * Normalize token address to LiFi format
+   * For native token, use null; otherwise use the token address
+   */
+  private normalizeLiFiToken(token: string): string | null {
+    if (
+      token === this.WBNB_ADDRESS ||
+      token === this.NATIVE_TOKEN_ONEINCH ||
+      token?.toLowerCase() === '0x0000000000000000000000000000000000000000'
+    ) {
+      return this.NATIVE_TOKEN_LIFI;
+    }
+    return token;
+  }
+
+  /**
    * Fetches quote from 1inch API
+   * 1inch uses 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE for native tokens
    */
   private async get1inchQuote(params: QuoteParams): Promise<QuoteResult | null> {
     try {
-      const src = params.sellToken === this.WBNB_ADDRESS ? this.NATIVE_TOKEN_ALT : params.sellToken;
-      const dst = params.buyToken === this.WBNB_ADDRESS ? this.NATIVE_TOKEN_ALT : params.buyToken;
+      const src = this.normalize1inchToken(params.sellToken);
+      const dst = this.normalize1inchToken(params.buyToken);
 
       const swapParams = {
         src,
@@ -101,22 +134,30 @@ class QuoteAggregator {
 
   /**
    * Fetches quote from LiFi API
-   * LiFi is a bridge & DEX aggregator that aggregates multiple DEXs including 1inch, Uniswap, etc.
+   * LiFi uses null for native token, not an address
    */
   private async getLiFiQuote(params: QuoteParams): Promise<QuoteResult | null> {
     try {
       logger.info(`Fetching LiFi quote...`);
 
       // For same-chain swaps, both fromChain and toChain are the same
-      const quoteParams = {
+      const fromToken = this.normalizeLiFiToken(params.sellToken);
+      const toToken = this.normalizeLiFiToken(params.buyToken);
+
+      const quoteParams: any = {
         fromChain: this.CHAIN_ID.toString(),
         toChain: this.CHAIN_ID.toString(),
-        fromToken: params.sellToken === this.WBNB_ADDRESS ? this.NATIVE_ZERO_ADDRESS : params.sellToken,
-        toToken: params.buyToken === this.WBNB_ADDRESS ? this.NATIVE_ZERO_ADDRESS : params.buyToken,
+        fromToken: fromToken === null ? undefined : fromToken,
+        toToken: toToken === null ? undefined : toToken,
         fromAmount: params.sellAmount,
         fromAddress: params.taker,
         slippage: (Number(params.slippage || '1') / 100).toString(), // LiFi uses decimal format (0.01 for 1%)
       };
+
+      // Remove undefined keys for cleaner API call
+      Object.keys(quoteParams).forEach(
+        (key) => quoteParams[key] === undefined && delete quoteParams[key]
+      );
 
       const quoteUrl = `${this.LIFI_BASE_URL}/quote?${new URLSearchParams(quoteParams).toString()}`;
       const quoteRes = await axios.get(quoteUrl, { timeout: 15000 });
@@ -194,8 +235,8 @@ class QuoteAggregator {
 
     const isBuyingNative = 
       params.buyToken === this.WBNB_ADDRESS ||
-      params.buyToken === this.NATIVE_TOKEN_ALT ||
-      params.buyToken === this.NATIVE_ZERO_ADDRESS;
+      params.buyToken === this.NATIVE_TOKEN_ONEINCH ||
+      params.buyToken?.toLowerCase() === '0x0000000000000000000000000000000000000000';
 
     // Fetch quotes in parallel from all providers
     const [

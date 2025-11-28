@@ -8,12 +8,12 @@ class AnalysisService {
   public activePositions: Map<string, TradePositionExtended> = new Map(); // token entry Txn Hash -> position
   private dbInitialized = false;
   public readonly ANALYSIS_THRESHOLDS = {
-    MIN_MARKET_CAP: 50000, // 50K min market cap
+    MIN_MARKET_CAP: 30000, // 30K min market cap
     MAX_RISK_LEVEL: 3,
     BASE_PROFIT_TARGET: 10, // 10% base profit
     BOOSTED_PROFIT_TARGET: 15, // 15% with smart money confirmation
     SMARTMONEY_CONFIRMATION_TIMEOUT: 1 * 60 * 60, // 1 hour
-    HOLD_DURATION_TIMEOUT: 5 * 60 * 60, //5 hour
+    HOLD_DURATION_TIMEOUT: 4 * 60 * 60, //4 hour
   };
 
   private async ensureDBReady() {
