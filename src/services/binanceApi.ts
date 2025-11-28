@@ -1,6 +1,6 @@
 import axios, { AxiosInstance } from 'axios';
 import { BinanceHeaders, ApiResponse } from '../types/api';
-import { SmartMoneyTransaction, TrendingToken, Kline } from '../types/index';
+import { SmartMoneyTransaction, TrendingToken, Kline, MarketDynamicsApi } from '../types/index';
 import { generateTraceId } from '../utils/helpers';
 import logger from '../utils/logger';
 import dotenv from "dotenv";
@@ -308,7 +308,7 @@ class BinanceApiService {
     }
   }
 
-  async getTokenMarketDynamics(contractAddress: string): Promise<any> {
+  async getTokenMarketDynamics(contractAddress: string): Promise<MarketDynamicsApi> {
     try {
       const response = await this.axiosInstancev4.get(
         `/wallet-direct/buw/wallet/market/token/dynamic/info?contractAddress=${contractAddress}&chainId=56`,

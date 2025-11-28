@@ -1,3 +1,19 @@
+export interface MarketDynamicsApi {
+  marketCap: string;
+  price: string;
+  top10HoldersPercentage: string;
+  count5m: string;
+  percentChange24h: string;
+  launchTime: string;
+  liquidity: string;
+  holders: string;
+  kycHolderCount: string;
+  holdersSmartMoneyPercent: string;
+  holdersInfluencersPercent: string;
+  totalSupply: string;
+  circulatingSupply: string;
+}
+
 export interface Kline {
     timestamp: number;
     open: string;

@@ -138,6 +138,13 @@ export class TokenSwapService {
 
     async executeBuyOrder(transaction: SmartMoneyTransaction, isRetry: boolean = false): Promise<TradePositionExtended | null> {
         const txKey = transaction.txHash;
+        const currentMarketDynamics = await binanceApi.getTokenMarketDynamics(transaction.ca);
+        const top10HoldersPercentage = parseFloat(currentMarketDynamics.top10HoldersPercentage || "0");
+
+        if (top10HoldersPercentage > 40) {
+            logger.warn(`⚠️ Extreme top 10 holders percentage ${top10HoldersPercentage} for ${txKey}`);
+            return null;
+        }
         
         try {
             if (!isRetry && this.pendingBuyingTokens.has(txKey)) {
@@ -191,7 +198,6 @@ export class TokenSwapService {
             logger.info(`🎉 BUY EXECUTED: ${transaction.tokenName} - ${receipt.hash}`);
 
             // Fetch market data
-            const currentMarketDynamics = await binanceApi.getTokenMarketDynamics(transaction.ca);
             const marketCap = parseFloat(currentMarketDynamics.marketCap);
             const price = parseFloat(currentMarketDynamics.price);
             const timestamp = Date.now();
@@ -350,8 +356,8 @@ export class TokenSwapService {
             // Get final market data
             const currentMarketPrice = monitoringService.activeWebSockets.get(position.tokenCA);
             const currentMarketDynamics = await binanceApi.getTokenMarketDynamics(position.tokenCA);
-            const totalSupply = parseFloat(currentMarketDynamics.totalSupply || 0);
-            const circulatingSupply = parseFloat(currentMarketDynamics.circulatingSupply || 0);
+            const totalSupply = parseFloat(currentMarketDynamics.totalSupply || "0");
+            const circulatingSupply = parseFloat(currentMarketDynamics.circulatingSupply || "0");
             const currentPrice = currentMarketPrice?.lastPrice || parseFloat(currentMarketDynamics.price);
 
             const supplyToUse = circulatingSupply < totalSupply ? circulatingSupply : totalSupply;
