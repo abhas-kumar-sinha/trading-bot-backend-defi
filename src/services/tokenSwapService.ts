@@ -139,14 +139,16 @@ export class TokenSwapService {
     async executeBuyOrder(transaction: SmartMoneyTransaction, isRetry: boolean = false): Promise<TradePositionExtended | null> {
         const txKey = transaction.txHash;
         const currentMarketDynamics = await binanceApi.getTokenMarketDynamics(transaction.ca);
-        const top10HoldersPercentage = parseFloat(currentMarketDynamics.top10HoldersPercentage || "0");
 
-        if (top10HoldersPercentage > 40) {
-            logger.warn(`⚠️ Extreme top 10 holders percentage ${top10HoldersPercentage} for ${txKey}`);
-            return null;
-        }
+        const isBuyAllowed = analysisService.checkBuyConditions(currentMarketDynamics);
         
         try {
+
+            if (!isBuyAllowed) {
+                logger.warn(`⚠️ Buy not allowed for ${txKey}`);
+                return null;
+            }
+
             if (!isRetry && this.pendingBuyingTokens.has(txKey)) {
                 logger.warn(`⚠️ Buy order already pending for ${txKey}`);
                 return null;

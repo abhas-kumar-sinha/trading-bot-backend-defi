@@ -1,5 +1,5 @@
 import pool, { initDB } from "../db";
-import { SmartMoneyTransaction, TrendingToken, TokenAnalysis, MonitoringAlert, TradePositionExtended } from '../types/index';
+import { SmartMoneyTransaction, TrendingToken, TokenAnalysis, MonitoringAlert, TradePositionExtended, MarketDynamicsApi } from '../types/index';
 import { calculateRiskScore } from '../utils/helpers';
 import logger from '../utils/logger';
 
@@ -179,6 +179,46 @@ class AnalysisService {
     } catch (err) {
       logger.error("❌ Error updating token current price:");
     }
+  }
+
+  checkBuyConditions(data: MarketDynamicsApi) {
+    const { marketCap, top10HoldersPercentage, liquidity, holders, holdersSmartMoneyPercent, holdersInfluencersPercent, circulatingSupply, count5m } = data;
+
+    let buyRating: number = 0;
+
+    if (parseFloat(holders) >= 300 && parseFloat(holders) <= 2500) {
+      buyRating += 1;
+    }
+
+    if (parseFloat(top10HoldersPercentage) <= 35) {
+      buyRating += 1;
+    }
+
+    if (parseFloat(liquidity) >= parseFloat(marketCap) * 0.45) {
+      buyRating += 1;
+    }
+
+    if (parseFloat(holdersSmartMoneyPercent) < 5) {
+      buyRating += 1;
+    }
+
+    if (parseFloat(holdersInfluencersPercent) < 5) {
+      buyRating += 1;
+    }
+
+    if (parseFloat(count5m) >= 200) {
+      buyRating += 1;
+    }
+
+    if (parseFloat(marketCap) <= 5000000) {
+      buyRating += 1;
+    }
+
+    if (buyRating >= 5) {
+      return true
+    }
+
+    return false;
   }
 
   async checkSellConditions(position: TradePositionExtended, currentPrice: number, currentMarketCap: number): Promise<{ shouldSell: boolean; reason: string } | null> {
