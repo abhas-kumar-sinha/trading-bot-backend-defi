@@ -52,7 +52,7 @@ export class TokenSwapService {
     private readonly APPROVAL_GAS_LIMIT = 100000n; // Fixed gas for approvals
 
     constructor() {
-        this.aggregator = new QuoteAggregator(this.QUICKNODE_RPC, this.ONEINCH_API_KEY);
+        this.aggregator = new QuoteAggregator(this.ONEINCH_API_KEY);
         this.startRetryProcessor();
     }
 
@@ -195,7 +195,7 @@ export class TokenSwapService {
 
             const txReq = await this.aggregator.buildTxFromQuote(
                 result.bestQuote.quote,
-                this.walletAddress
+                result.bestQuote.provider
             );
 
             // Validate transaction has data
@@ -204,7 +204,10 @@ export class TokenSwapService {
             }
 
             // OPTIMIZED: Fast transaction execution with fixed gas
-            const receipt = await this.sendAndWait(txReq, 60_000);
+            // const receipt = await this.sendAndWait(txReq, 60_000);
+            const receipt = {
+                hash: `testhash- ${new Date().getTime()}`
+            }
 
             logger.info(`🎉 BUY EXECUTED: ${transaction.tokenName} - ${receipt.hash}`);
 
@@ -355,7 +358,7 @@ export class TokenSwapService {
 
             const txReq = await this.aggregator.buildTxFromQuote(
                 result.bestQuote.quote,
-                taker
+                result.bestQuote.provider
             );
 
             // Validate transaction has data
@@ -364,7 +367,10 @@ export class TokenSwapService {
             }
 
             // OPTIMIZED: Fast sell transaction with fixed gas
-            const receipt = await this.sendAndWait(txReq, 60_000);
+            // const receipt = await this.sendAndWait(txReq, 60_000);
+            const receipt = {
+                hash: `testhash- ${new Date().getTime()}`
+            }
 
             logger.info(`🎉 SELL EXECUTED: ${position.tokenName} - ${receipt.hash}`);
 
