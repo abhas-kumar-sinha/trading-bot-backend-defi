@@ -12,6 +12,7 @@ export interface MarketDynamicsApi {
   holdersInfluencersPercent: string;
   totalSupply: string;
   circulatingSupply: string;
+  volume24h: string;
 }
 
 export interface Kline {

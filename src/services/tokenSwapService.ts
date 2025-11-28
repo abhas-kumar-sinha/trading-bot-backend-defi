@@ -140,7 +140,7 @@ export class TokenSwapService {
         const txKey = transaction.txHash;
         const currentMarketDynamics = await binanceApi.getTokenMarketDynamics(transaction.ca);
 
-        const isBuyAllowed = analysisService.checkBuyConditions(currentMarketDynamics);
+        const isBuyAllowed = analysisService.checkBuyConditions(currentMarketDynamics, transaction.tokenName);
         
         try {
 
@@ -210,7 +210,6 @@ export class TokenSwapService {
                 name: transaction.tokenName,
                 marketCap: marketCap,
                 price: price,
-                volume24h: parseFloat(transaction.txUsdValue),
                 count5m: parseFloat(currentMarketDynamics.count5m),
                 priceChange24h: parseFloat(currentMarketDynamics.percentChange24h),
                 launchTime: parseFloat(currentMarketDynamics.launchTime),

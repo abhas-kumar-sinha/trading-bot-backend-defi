@@ -181,8 +181,8 @@ class AnalysisService {
     }
   }
 
-  checkBuyConditions(data: MarketDynamicsApi) {
-    const { marketCap, top10HoldersPercentage, liquidity, holders, holdersSmartMoneyPercent, holdersInfluencersPercent, circulatingSupply, count5m } = data;
+  checkBuyConditions(data: MarketDynamicsApi, tokenName: string) {
+    const { marketCap, top10HoldersPercentage, liquidity, holders, holdersSmartMoneyPercent, holdersInfluencersPercent, count5m, volume24h } = data;
 
     let buyRating: number = 0;
 
@@ -198,15 +198,19 @@ class AnalysisService {
       buyRating += 1;
     }
 
-    if (parseFloat(holdersSmartMoneyPercent) < 5) {
+    if (parseFloat(holdersSmartMoneyPercent) >= 0.1 && parseFloat(holdersSmartMoneyPercent) < 6) {
       buyRating += 1;
     }
 
-    if (parseFloat(holdersInfluencersPercent) < 5) {
+    if (parseFloat(holdersInfluencersPercent) >= 0.1 && parseFloat(holdersInfluencersPercent) < 6) {
       buyRating += 1;
     }
 
-    if (parseFloat(count5m) >= 200) {
+    if (parseFloat(count5m) >= 170) {
+      buyRating += 1;
+    }
+
+    if (parseFloat(volume24h) >= parseFloat(marketCap) * 0.25) {
       buyRating += 1;
     }
 
@@ -214,7 +218,7 @@ class AnalysisService {
       buyRating += 1;
     }
 
-    if (buyRating >= 5) {
+    if (buyRating >= 6) {
       return true
     }
 
