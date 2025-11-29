@@ -373,35 +373,53 @@ class QuoteAggregator {
 
   /**
    * Build transaction from quote
+   * Fixed: Properly handles LiFi transactionRequest structure
    */
   async buildTxFromQuote(quote: any, provider: string): Promise<any> {
     if (!quote) {
       throw new Error('No quote provided');
     }
 
-    // For 1inch quotes
-    if (provider === '1inch' && quote.tx) {
-      return {
-        to: quote.tx.to,
-        data: quote.tx.data,
-        value: quote.tx.value || '0',
-        gas: quote.tx.gas,
-        gasPrice: quote.tx.gasPrice,
-      };
-    }
+    try {
+      // For 1inch quotes
+      if (provider === '1inch' && quote.tx) {
+        return {
+          to: quote.tx.to,
+          data: quote.tx.data,
+          value: quote.tx.value || '0',
+          gas: quote.tx.gas,
+          gasPrice: quote.tx.gasPrice,
+          from: quote.tx.from,
+        };
+      }
 
-    // For LiFi quotes
-    if (provider === 'LiFi' && quote.transactionRequest) {
-      return {
-        to: quote.transactionRequest.to,
-        data: quote.transactionRequest.data,
-        value: quote.transactionRequest.value || '0',
-        gas: quote.transactionRequest.gasLimit,
-        gasPrice: quote.transactionRequest.gasPrice,
-      };
-    }
+      // For LiFi quotes - FIXED: Use transactionRequest from the main quote object
+      // The quote structure is: { transactionRequest: {...}, estimate: {...}, ... }
+      if (provider === 'LiFi') {
+        const txRequest = quote.transactionRequest;
+        
+        if (!txRequest) {
+          logger.error('❌ LiFi quote missing transactionRequest');
+          throw new Error('LiFi quote does not contain transactionRequest');
+        }
 
-    throw new Error('Invalid quote format or unsupported provider');
+        // LiFi transactionRequest structure: { to, data, value, gasLimit }
+        // gasLimit is in hex format
+        return {
+          to: txRequest.to,
+          data: txRequest.data,
+          value: txRequest.value || '0',
+          gas: txRequest.gasLimit ? parseInt(txRequest.gasLimit, 16).toString() : undefined,
+          gasPrice: undefined, // LiFi doesn't include gasPrice in transactionRequest
+          from: quote.action?.fromAddress, // From address may be in action object
+        };
+      }
+
+      throw new Error(`Unsupported provider: ${provider}`);
+    } catch (error: any) {
+      logger.error(`❌ Failed to build transaction from ${provider} quote: ${error.message}`);
+      throw error;
+    }
   }
 
   /**
