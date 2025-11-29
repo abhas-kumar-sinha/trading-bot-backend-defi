@@ -294,13 +294,61 @@ export class TokenSwapService {
             ], this.wallet);
 
             const balance: bigint = await ERC20.balanceOf(taker);
-            
+
             if (balance === 0n) {
                 throw new Error(`No token balance for ${position.tokenSymbol}`);
             }
 
             logger.info(`💼 Token balance: ${balance.toString()} ${position.tokenSymbol}`);
 
+            // ============================================
+            // STEP 1: Check and handle approval FIRST
+            // ============================================
+            const hasAllowance = await this.aggregator.hasEnough1inchAllowance(
+                tokenAddress,
+                taker,
+                balance.toString()
+            );
+
+            if (!hasAllowance) {
+                logger.info(`🔓 Approval required for 1inch router`);
+                
+                // Get approval transaction from 1inch API
+                const approvalTx = await this.aggregator.get1inchApprovalTx(
+                    tokenAddress,
+                    balance.toString() // Approve exact amount or omit for unlimited
+                );
+                
+                if (!approvalTx) {
+                    throw new Error('Failed to get approval transaction from 1inch');
+                }
+                
+                logger.info(`⏳ Sending approval transaction...`);
+                
+                // Send approval transaction
+                const approveTxResponse = await this.wallet.sendTransaction({
+                    to: approvalTx.to,
+                    data: approvalTx.data,
+                    value: approvalTx.value,
+                    gasLimit: approvalTx.gasLimit || '100000',
+                });
+                
+                logger.info(`⏳ Approval tx sent: ${approveTxResponse.hash}`);
+                
+                const approvalReceipt = await approveTxResponse.wait(1);
+                
+                if (approvalReceipt?.status === 0) {
+                    throw new Error('Approval transaction failed');
+                }
+                
+                logger.info(`✅ Approval confirmed`);
+            } else {
+                logger.info(`✅ Token already approved`);
+            }
+
+            // ============================================
+            // STEP 2: Now get quote (will succeed because token is approved)
+            // ============================================
             const result = await this.aggregator.getBestQuote({
                 sellToken: tokenAddress,
                 buyToken: monitoringService.NATIVE_TOKEN_TRADES,
@@ -313,32 +361,13 @@ export class TokenSwapService {
                 throw new Error("No valid quotes for sell");
             }
 
-            // Perform approval if needed
-            const allowanceTarget = result.bestQuote.allowanceTarget;
-            if (allowanceTarget) {
-                const allowance: bigint = await ERC20.allowance(taker, allowanceTarget);
+            logger.info(`✅ Best quote from ${result.bestQuote.provider}`);
+            logger.info(`   Buy amount: ${result.bestQuote.buyAmount}`);
+            logger.info(`   Net value: ${result.bestQuote.netValue}`);
 
-                if (allowance < balance) {
-                    logger.info(`🔓 Approving ${result.bestQuote.provider} to spend tokens`);
-                    
-                    // Approval transaction with default gas settings
-                    const approveTx = await ERC20.approve(allowanceTarget, balance);
-                    
-                    logger.info(`⏳ Approval tx sent: ${approveTx.hash}`);
-                    const approvalReceipt = await approveTx.wait(1);
-                    
-                    if (approvalReceipt.status === 0) {
-                        throw new Error('Approval transaction failed');
-                    }
-                    
-                    logger.info(`✅ Approval confirmed`);
-                } else {
-                    logger.debug(`✅ Sufficient allowance already present`);
-                }
-            }
-
-            logger.info(`✅ Best quote from ${result.bestQuote.provider} - Expected BNB: ${result.bestQuote.quote}`);
-
+            // ============================================
+            // STEP 3: Build and execute swap transaction
+            // ============================================
             const txReq = await this.aggregator.buildTxFromQuote(
                 result.bestQuote.quote,
                 result.bestQuote.provider
@@ -349,10 +378,11 @@ export class TokenSwapService {
                 throw new Error('Invalid transaction data from aggregator');
             }
 
-            // Send transaction with default gas settings from quote
+            // Send transaction
             const receipt = await this.sendAndWait(txReq, 60_000);
 
             logger.info(`🎉 SELL EXECUTED: ${position.tokenName} - ${receipt.hash}`);
+            logger.info(`   Transaction: ${receipt.hash}`);
 
             // Get final market data
             const currentMarketPrice = monitoringService.activeWebSockets.get(position.tokenCA);

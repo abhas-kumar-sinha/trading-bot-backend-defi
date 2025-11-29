@@ -29,6 +29,13 @@ interface AggregatedQuoteResult {
   savingsType?: 'buyAmount' | 'netValue';
 }
 
+interface ApprovalTransaction {
+  to: string;
+  data: string;
+  value: string;
+  gasLimit?: string;
+}
+
 class QuoteAggregator {
   private ONEINCH_API_KEY: string;
   private CHAIN_ID = 56;
@@ -41,6 +48,8 @@ class QuoteAggregator {
   private readonly NATIVE_TOKEN_ONEINCH = '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE';
   // LiFi uses null/undefined for native token
   private readonly NATIVE_TOKEN_LIFI = null;
+  // 1inch router address on BSC
+  private readonly ONEINCH_ROUTER_BSC = '0x111111125421ca6dc452d289314280a0f8842a65';
 
   constructor(oneInchApiKey: string) {
     this.ONEINCH_API_KEY = oneInchApiKey;
@@ -77,6 +86,152 @@ class QuoteAggregator {
   }
 
   /**
+   * Checks if token is native (BNB, ETH, etc.)
+   */
+  private isNativeToken(address: string): boolean {
+    const normalized = address.toLowerCase();
+    return (
+      normalized === this.NATIVE_TOKEN_ONEINCH.toLowerCase() ||
+      normalized === '0x0000000000000000000000000000000000000000' ||
+      normalized === this.WBNB_ADDRESS.toLowerCase()
+    );
+  }
+
+  /**
+   * Checks token allowance for 1inch router
+   * Returns the current allowance amount
+   */
+  async check1inchAllowance(
+    tokenAddress: string,
+    ownerAddress: string
+  ): Promise<string> {
+    try {
+      // Skip allowance check for native tokens
+      if (this.isNativeToken(tokenAddress)) {
+        return '0'; // Native tokens don't need approval
+      }
+
+      const allowanceUrl = `${this.ONEINCH_BASE_URL}/approve/allowance`;
+      const params = {
+        tokenAddress,
+        walletAddress: ownerAddress,
+      };
+
+      logger.info(`Checking 1inch allowance for token ${tokenAddress}...`);
+      
+      const allowanceResponse = await axios.get(allowanceUrl, {
+        params,
+        headers: {
+          Accept: 'application/json',
+          Authorization: `Bearer ${this.ONEINCH_API_KEY}`,
+        },
+        timeout: 10000,
+      });
+
+      const currentAllowance = allowanceResponse.data.allowance || '0';
+      logger.info(`Current allowance: ${currentAllowance}`);
+      
+      return currentAllowance;
+    } catch (error: any) {
+      logger.error(`1inch allowance check failed: ${error.response?.data?.description || error.message}`);
+      return '0';
+    }
+  }
+
+  /**
+   * Gets approval transaction data for 1inch router
+   * Returns transaction data that needs to be executed to approve tokens
+   */
+  async get1inchApprovalTx(
+    tokenAddress: string,
+    amount?: string
+  ): Promise<ApprovalTransaction | null> {
+    try {
+      // Skip approval for native tokens
+      if (this.isNativeToken(tokenAddress)) {
+        logger.info(`Native token detected, no approval needed`);
+        return null;
+      }
+
+      const approveUrl = `${this.ONEINCH_BASE_URL}/approve/transaction`;
+      const params: any = {
+        tokenAddress,
+      };
+
+      // If amount is provided, approve specific amount; otherwise approve unlimited
+      if (amount) {
+        params.amount = amount;
+      }
+
+      logger.info(`Getting 1inch approval transaction for token ${tokenAddress}...`);
+      
+      const approveResponse = await axios.get(approveUrl, {
+        params,
+        headers: {
+          Accept: 'application/json',
+          Authorization: `Bearer ${this.ONEINCH_API_KEY}`,
+        },
+        timeout: 10000,
+      });
+
+      const approveTx = approveResponse.data;
+
+      if (!approveTx || !approveTx.data || !approveTx.to) {
+        logger.warn(`1inch: Invalid approval transaction response`);
+        return null;
+      }
+
+      logger.info(`Approval transaction obtained:`, {
+        to: approveTx.to,
+        gasLimit: approveTx.gasLimit || approveTx.gas || '100000',
+      });
+
+      return {
+        to: approveTx.to,
+        data: approveTx.data,
+        value: approveTx.value || '0',
+        gasLimit: approveTx.gasLimit || approveTx.gas,
+      };
+    } catch (error: any) {
+      logger.error(`1inch approval tx failed: ${error.response?.data?.description || error.message}`);
+      return null;
+    }
+  }
+
+  /**
+   * Checks if token has sufficient allowance for the swap
+   * Returns true if allowance is sufficient, false if approval is needed
+   */
+  async hasEnough1inchAllowance(
+    tokenAddress: string,
+    ownerAddress: string,
+    requiredAmount: string
+  ): Promise<boolean> {
+    try {
+      // Native tokens don't need approval
+      if (this.isNativeToken(tokenAddress)) {
+        return true;
+      }
+
+      const currentAllowance = await this.check1inchAllowance(tokenAddress, ownerAddress);
+      
+      const hasEnough = BigInt(currentAllowance) >= BigInt(requiredAmount);
+      
+      if (hasEnough) {
+        logger.info(`✅ Sufficient allowance: ${currentAllowance} >= ${requiredAmount}`);
+      } else {
+        logger.warn(`⚠️  Insufficient allowance: ${currentAllowance} < ${requiredAmount}`);
+        logger.warn(`   Approval required for ${tokenAddress}`);
+      }
+      
+      return hasEnough;
+    } catch (error: any) {
+      logger.error(`Error checking allowance: ${error.message}`);
+      return false;
+    }
+  }
+
+  /**
    * Fetches quote from 1inch API
    * 1inch uses 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE for native tokens
    */
@@ -84,6 +239,27 @@ class QuoteAggregator {
     try {
       const src = this.normalize1inchToken(params.sellToken);
       const dst = this.normalize1inchToken(params.buyToken);
+
+      // Check allowance before getting quote (only for token sells, not native BNB)
+      if (!this.isNativeToken(params.sellToken)) {
+        logger.info(`Checking if approval is needed for token swap...`);
+        
+        const hasAllowance = await this.hasEnough1inchAllowance(
+          params.sellToken,
+          params.taker,
+          params.sellAmount
+        );
+
+        if (!hasAllowance) {
+          logger.error(`❌ Insufficient token allowance for 1inch router`);
+          logger.error(`   Token: ${params.sellToken}`);
+          logger.error(`   Amount needed: ${params.sellAmount}`);
+          logger.error(`   Please approve tokens first using get1inchApprovalTx()`);
+          return null;
+        }
+        
+        logger.info(`✅ Token approval verified`);
+      }
 
       const swapParams = {
         src,
@@ -426,4 +602,4 @@ class QuoteAggregator {
   }
 }
 
-export { QuoteAggregator, QuoteParams, QuoteResult, AggregatedQuoteResult };
+export { QuoteAggregator, QuoteParams, QuoteResult, AggregatedQuoteResult, ApprovalTransaction };
