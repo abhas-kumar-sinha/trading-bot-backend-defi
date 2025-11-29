@@ -37,9 +37,7 @@ class QuoteAggregator {
   // BSC native token representations
   private readonly WBNB_ADDRESS = '0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c';
   // 1inch uses this standard address for native token on ALL chains
-  private readonly NATIVE_TOKEN_ONEINCH = '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE';
-  // LiFi uses null/undefined for native token
-  private readonly NATIVE_TOKEN_LIFI = null;
+  private readonly NATIVE_TOKEN = '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE';
 
   constructor(oneInchApiKey: string, liFiApiKey: string) {
     this.ONEINCH_API_KEY = oneInchApiKey;
@@ -53,10 +51,10 @@ class QuoteAggregator {
   private normalize1inchToken(token: string): string {
     if (
       token === this.WBNB_ADDRESS ||
-      token === this.NATIVE_TOKEN_ONEINCH ||
+      token === this.NATIVE_TOKEN ||
       token?.toLowerCase() === '0x0000000000000000000000000000000000000000'
     ) {
-      return this.NATIVE_TOKEN_ONEINCH;
+      return this.NATIVE_TOKEN;
     }
     return token;
   }
@@ -68,10 +66,10 @@ class QuoteAggregator {
   private normalizeLiFiToken(token: string): string | null {
     if (
       token === this.WBNB_ADDRESS ||
-      token === this.NATIVE_TOKEN_ONEINCH ||
+      token === this.NATIVE_TOKEN ||
       token?.toLowerCase() === '0x0000000000000000000000000000000000000000'
     ) {
-      return this.NATIVE_TOKEN_LIFI;
+      return this.NATIVE_TOKEN;
     }
     return token;
   }
@@ -244,7 +242,7 @@ class QuoteAggregator {
 
     const isBuyingNative = 
       params.buyToken === this.WBNB_ADDRESS ||
-      params.buyToken === this.NATIVE_TOKEN_ONEINCH ||
+      params.buyToken === this.NATIVE_TOKEN ||
       params.buyToken?.toLowerCase() === '0x0000000000000000000000000000000000000000';
 
     // Fetch quotes in parallel from all providers
@@ -335,7 +333,7 @@ class QuoteAggregator {
     
     const isBuyingNative = 
       params.buyToken === this.WBNB_ADDRESS ||
-      params.buyToken === this.NATIVE_TOKEN_ONEINCH ||
+      params.buyToken === this.NATIVE_TOKEN ||
       params.buyToken?.toLowerCase() === '0x0000000000000000000000000000000000000000';
     
     // Fetch quotes in parallel with individual error handling
