@@ -6,7 +6,7 @@ export class TradeController {
     private aggregator: QuoteAggregator;
 
     constructor() {
-        this.aggregator = new QuoteAggregator(process.env.ONEINCH_API_KEY);
+        this.aggregator = new QuoteAggregator(process.env.ONEINCH_API_KEY, process.env.LIFI_API_KEY);
     }
     
     getTradeQuotes = async (req: Request, res: Response) => {
