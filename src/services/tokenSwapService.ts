@@ -22,7 +22,6 @@ export class TokenSwapService {
     private dbInitialized = false;
 
     private readonly QUICKNODE_RPC: string = process.env.QUICKNODE_RPC!;
-    private readonly ONEINCH_API_KEY: string = process.env.ONEINCH_API_KEY!;
     private readonly LIFI_API_KEY: string = process.env.LIFI_API_KEY!;
     private readonly PRIVATE_KEY: string = process.env.PRIVATE_KEY!;
     private readonly provider = new JsonRpcProvider(this.QUICKNODE_RPC);
@@ -47,7 +46,7 @@ export class TokenSwapService {
     };
 
     constructor() {
-        this.aggregator = new QuoteAggregator(this.ONEINCH_API_KEY, this.LIFI_API_KEY);
+        this.aggregator = new QuoteAggregator(this.LIFI_API_KEY);
         this.startRetryProcessor();
     }
 
@@ -182,12 +181,9 @@ export class TokenSwapService {
                 throw new Error("No valid quotes available");
             }
 
-            logger.info(`✅ Best quote from ${result.bestQuote.provider} - Expected tokens: ${result.bestQuote.quote}`);
+            logger.info(`✅ Best quote from ${result.bestQuote.provider} - Expected tokens: ${result.bestQuote.buyAmount}, tool: ${result.bestQuote.quote.tool}`);
 
-            const txReq = await this.aggregator.buildTxFromQuote(
-                result.bestQuote.quote,
-                result.bestQuote.provider
-            );
+            const txReq = result.bestQuote.quote.transactionRequest;
 
             // Validate transaction has data
             if (!txReq.data || txReq.data === '0x') {
@@ -338,10 +334,7 @@ export class TokenSwapService {
 
             logger.info(`✅ Best quote from ${result.bestQuote.provider} - Expected BNB: ${result.bestQuote.quote}`);
 
-            const txReq = await this.aggregator.buildTxFromQuote(
-                result.bestQuote.quote,
-                result.bestQuote.provider
-            );
+            const txReq = result.bestQuote.quote.transactionRequest;
 
             // Validate transaction has data
             if (!txReq.data || txReq.data === '0x') {
