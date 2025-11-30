@@ -84,7 +84,6 @@ class AnalysisService {
 
   updateTrendingCache(trendingTokens: TrendingToken[]): void {
     this.trendingTokensCache = trendingTokens;
-    logger.info(`Updated trending tokens cache with ${trendingTokens.length} tokens`);
   }
 
   analyzeFollowingTransaction(transaction: SmartMoneyTransaction): MonitoringAlert | null {
