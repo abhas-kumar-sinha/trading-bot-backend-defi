@@ -278,7 +278,6 @@ class BinanceApiService {
   
       const combined = [...pnlList, ...activeList];
   
-      logger.info(`Fetched ${combined.length} trade stats for ${address}`);
       return combined;
     } catch (error: any) {
       logger.error(`Error fetching trade stats for ${address}: ${error.message}`);
