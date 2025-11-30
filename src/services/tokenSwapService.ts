@@ -42,14 +42,6 @@ export class TokenSwapService {
     // Trade variables
     private readonly INR_TO_SPEND: number = Number(process.env.INR_TO_SPEND ?? 120);
 
-    // Slippage configuration
-    private readonly SLIPPAGE_CONFIG = {
-        MIN: 1,           // Start with 1%
-        MAX: 15,          // Maximum allowed 15%
-        INCREMENT: 2,     // Increase by 2% on each retry
-        DEFAULT: 3        // Default for first attempt
-    };
-
     private readonly TRADE_THRESHOLDS = {
         BASE_PROFIT_TARGET: 10,
     };
@@ -66,40 +58,6 @@ export class TokenSwapService {
         }
     }
 
-    /**
-     * Pre-flight check to validate token before attempting swap
-     */
-    private async validateTokenForSwap(tokenAddress: string, isForBuying: boolean): Promise<{ valid: boolean; reason?: string }> {
-        try {
-            const ERC20 = new Contract(tokenAddress, [
-                "function balanceOf(address owner) view returns (uint256)",
-                "function totalSupply() view returns (uint256)",
-            ], this.provider);
-
-            // Check if token contract exists and is callable
-            const totalSupply = await ERC20.totalSupply();
-            
-            if (totalSupply === 0n) {
-                return { valid: false, reason: 'Token has zero supply' };
-            }
-
-            // For buying: check if we can read basic token info
-            if (isForBuying) {
-                // Try to get balance of a known address (WBNB)
-                try {
-                    await ERC20.balanceOf('0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c');
-                } catch (error) {
-                    return { valid: false, reason: 'Token contract has restricted read functions' };
-                }
-            }
-
-            return { valid: true };
-        } catch (error) {
-            logger.warn(`⚠️ Token validation failed: ${error}`);
-            return { valid: false, reason: 'Token contract not accessible' };
-        }
-    }
-
     private jsonObjectBigIntSafe<T>(value: T): T {
         return JSON.parse(
             JSON.stringify(value, (_key, val) =>
@@ -109,106 +67,33 @@ export class TokenSwapService {
     }
 
     /**
-     * Calculate dynamic slippage based on attempt number and error type
+     * Send and wait for transaction confirmation
+     * Uses default gas and gas price from the quote
      */
-    private calculateSlippage(attempts: number, lastError?: string): number {
-        // If last error was slippage-related, be more aggressive
-        const isSlippageError = lastError?.toLowerCase().includes('return amount') || 
-                               lastError?.toLowerCase().includes('slippage') ||
-                               lastError?.toLowerCase().includes('insufficient');
-        
-        if (attempts === 0) {
-            return this.SLIPPAGE_CONFIG.DEFAULT;
-        }
-        
-        const baseIncrease = isSlippageError ? this.SLIPPAGE_CONFIG.INCREMENT * 1.5 : this.SLIPPAGE_CONFIG.INCREMENT;
-        const calculatedSlippage = this.SLIPPAGE_CONFIG.DEFAULT + (attempts * baseIncrease);
-        
-        return Math.min(calculatedSlippage, this.SLIPPAGE_CONFIG.MAX);
-    }
+    private async sendAndWait(txRequest: TransactionRequest, timeoutMs = 60_000): Promise<TransactionReceipt> {
+        logger.info(`📡 Submitting transaction with default gas settings`);
 
-    /**
-     * Enhanced gas estimation with fallback - now throws on estimation failure
-     */
-    private async estimateGasWithFallback(txRequest: TransactionRequest): Promise<bigint> {
+        // Send transaction immediately with quote's default gas settings
+        const signedTx = await this.wallet.sendTransaction(txRequest);
+        const hash = signedTx.hash;
+        logger.info(`📡 Broadcasted tx ${hash}`);
+        
+        const timeout = new Promise<never>((_, rej) => 
+            setTimeout(() => rej(new Error("Transaction timeout")), timeoutMs)
+        );
+        
         try {
-            const estimated = await this.provider.estimateGas(txRequest);
-            // Add 30% buffer for safety (increased from 20%)
-            return (estimated * 130n) / 100n;
-        } catch (error) {
-            // Parse the revert reason
-            const errorStr = String(error);
-            let revertReason = 'unknown';
-            
-            if (errorStr.includes('transfer token failed')) {
-                revertReason = 'token transfer restrictions';
-            } else if (errorStr.includes('Return amount is not enough')) {
-                revertReason = 'insufficient output amount (slippage)';
-            } else if (errorStr.includes('insufficient liquidity')) {
-                revertReason = 'insufficient liquidity';
-            }
-            
-            logger.error(`❌ Gas estimation failed: ${revertReason}`);
-            logger.debug(`Full error: ${errorStr}`);
-            
-            // DO NOT use fallback - throw error to prevent doomed transaction
-            throw new Error(`Transaction will fail: ${revertReason}`);
-        }
-    }
-
-    /**
-     * Get current gas price with buffer
-     */
-    private async getGasPrice(): Promise<bigint> {
-        const feeData = await this.provider.getFeeData();
-        const gasPrice = feeData.gasPrice || parseUnits('5', 'gwei');
-        
-        // Add 10% buffer to gas price
-        return (gasPrice * 110n) / 100n;
-    }
-
-    /**
-     * Send and wait for transaction confirmation with enhanced error handling
-     */
-    private async sendAndWait(
-        txRequest: TransactionRequest, 
-        timeoutMs = 60_000,
-        attemptNumber = 0
-    ): Promise<TransactionReceipt> {
-        try {
-            // Estimate gas - this will throw if transaction will fail
-            const gasLimit = await this.estimateGasWithFallback(txRequest);
-            const gasPrice = await this.getGasPrice();
-            
-            // Override with calculated values
-            txRequest.gasLimit = gasLimit;
-            txRequest.gasPrice = gasPrice;
-            
-            logger.info(`📡 Submitting tx (attempt ${attemptNumber + 1}) - Gas: ${gasLimit}, Price: ${gasPrice}`);
-
-            const signedTx = await this.wallet.sendTransaction(txRequest);
-            const hash = signedTx.hash;
-            logger.info(`📡 Broadcasted tx ${hash}`);
-            
-            const timeout = new Promise<never>((_, rej) => 
-                setTimeout(() => rej(new Error("Transaction timeout")), timeoutMs)
-            );
-            
             const receipt = await Promise.race([signedTx.wait(1), timeout]) as TransactionReceipt;
             
             if (receipt.status === 0) {
-                // Transaction was mined but reverted
-                logger.error(`❌ Transaction reverted on-chain: ${hash}`);
-                logger.debug(`Gas used: ${receipt.gasUsed}/${gasLimit}`);
-                throw new Error('Transaction reverted on-chain - likely front-run or token restrictions');
+                throw new Error('Transaction failed');
             }
             
             logger.info(`✅ Tx confirmed: ${hash} (Block: ${receipt.blockNumber})`);
             return receipt;
         } catch (err) {
-            const error = err as Error;
-            logger.error(`❌ Tx failed:`, error.message);
-            throw error;
+            logger.error(`❌ Tx failed: ${hash}`, err);
+            throw err;
         }
     }
 
@@ -272,12 +157,6 @@ export class TokenSwapService {
 
             this.pendingBuyingTokens.add(txKey);
 
-            // Validate token before attempting swap
-            const validation = await this.validateTokenForSwap(transaction.ca, true);
-            if (!validation.valid) {
-                throw new Error(`Token validation failed: ${validation.reason}`);
-            }
-
             const currentBNBPrice = monitoringService.activeWebSockets.get(
                 monitoringService.NATIVE_TOKEN_DATA
             )?.lastPrice;
@@ -289,20 +168,15 @@ export class TokenSwapService {
             const bnbToSpend = this.INR_TO_SPEND / (currentBNBPrice * 85);
             const amountInWei = parseUnits(bnbToSpend.toFixed(18), 18);
 
-            // Calculate dynamic slippage
-            const failed = this.failedTransactions.get(txKey);
-            const attempts = failed?.attempts || 0;
-            const slippage = this.calculateSlippage(attempts, failed?.lastError);
-            
-            logger.info(`💵 Spending ${bnbToSpend.toFixed(6)} BNB (~₹${this.INR_TO_SPEND}) for ${transaction.tokenName} (Slippage: ${slippage}%)`);
+            logger.info(`💵 Spending ${bnbToSpend.toFixed(6)} BNB (~₹${this.INR_TO_SPEND}) for ${transaction.tokenName}`);
 
-            // Get best quote with dynamic slippage
+            // Get best quote
             const result = await this.aggregator.getBestQuote({
                 sellToken: monitoringService.NATIVE_TOKEN_TRADES,
                 buyToken: transaction.ca,
                 sellAmount: amountInWei.toString(),
                 taker: this.walletAddress,
-                slippage: slippage.toString(),
+                slippage: '1',
             });
 
             if (!result) {
@@ -321,18 +195,8 @@ export class TokenSwapService {
                 throw new Error('Invalid transaction data from aggregator');
             }
 
-            // Validate quote is still fresh (within 30 seconds)
-            const quoteAge = Date.now() - (result.bestQuote.quote.timestamp || Date.now());
-            if (quoteAge > 30000) {
-                logger.warn(`⚠️ Quote is ${quoteAge}ms old, refreshing...`);
-                throw new Error('Quote too old, retry needed');
-            }
-
-            // Small delay to avoid same-block submission issues (helps with front-running detection)
-            await new Promise(resolve => setTimeout(resolve, 1000));
-
-            // Send transaction with enhanced gas handling
-            const receipt = await this.sendAndWait(txReq, 60_000, attempts);
+            // Send transaction with default gas settings from quote
+            const receipt = await this.sendAndWait(txReq, 60_000);
 
             logger.info(`🎉 BUY EXECUTED: ${transaction.tokenName} - ${receipt.hash}`);
 
@@ -395,40 +259,15 @@ export class TokenSwapService {
             const errorMessage = error instanceof Error ? error.message : String(error);
             logger.error(`❌ Buy failed for ${transaction.tokenName}: ${errorMessage}`);
 
-            // Check if error is retryable
-            const isRetryable = 
-                errorMessage.includes('Return amount is not enough') ||
-                errorMessage.includes('insufficient output amount') ||
-                errorMessage.includes('Quote too old') ||
-                errorMessage.includes('timeout') ||
-                errorMessage.includes('network') ||
-                errorMessage.includes('nonce');
-
-            // NOT retryable: token restrictions, front-run, on-chain reverts
-            const isNonRetryable = 
-                errorMessage.includes('token transfer restrictions') ||
-                errorMessage.includes('reverted on-chain') ||
-                errorMessage.includes('transfer token failed') ||
-                errorMessage.includes('honeypot') ||
-                errorMessage.includes('blacklist');
-
-            if (isNonRetryable) {
-                logger.error(`❌ Non-retryable error (token/contract issue): ${errorMessage}`);
-                return null;
-            }
-
-            if (isRetryable && (!isRetry || !this.failedTransactions.has(txKey))) {
-                const currentFailed = this.failedTransactions.get(txKey);
+            if (!isRetry || !this.failedTransactions.has(txKey)) {
                 this.failedTransactions.set(txKey, {
                     transaction,
                     type: 'buy',
-                    attempts: currentFailed ? currentFailed.attempts + 1 : (isRetry ? 1 : 0),
+                    attempts: isRetry ? 1 : 0,
                     lastError: errorMessage,
                     lastAttempt: Date.now()
                 });
-                logger.info(`📝 Added to retry queue: ${txKey} (attempts: ${this.failedTransactions.get(txKey)!.attempts})`);
-            } else {
-                logger.error(`❌ Skipping retry for: ${errorMessage}`);
+                logger.info(`📝 Added to retry queue: ${txKey}`);
             }
 
             return null;
@@ -463,19 +302,12 @@ export class TokenSwapService {
 
             logger.info(`💼 Token balance: ${balance.toString()} ${position.tokenSymbol}`);
 
-            // Calculate dynamic slippage
-            const failed = this.failedTransactions.get(txKey);
-            const attempts = failed?.attempts || 0;
-            const slippage = this.calculateSlippage(attempts, failed?.lastError);
-            
-            logger.info(`💰 Selling with ${slippage}% slippage tolerance`);
-
             const result = await this.aggregator.getBestQuote({
                 sellToken: tokenAddress,
                 buyToken: monitoringService.NATIVE_TOKEN_TRADES,
                 sellAmount: balance.toString(),
                 taker,
-                slippage: slippage.toString(),
+                slippage: '1',
             });
 
             if (!result) {
@@ -490,13 +322,8 @@ export class TokenSwapService {
                 if (allowance < balance) {
                     logger.info(`🔓 Approving ${result.bestQuote.provider} to spend tokens`);
                     
-                    // Get gas price for approval
-                    const gasPrice = await this.getGasPrice();
-                    
-                    const approveTx = await ERC20.approve(allowanceTarget, balance, {
-                        gasPrice: gasPrice,
-                        gasLimit: 100000n // Standard approval gas limit
-                    });
+                    // Approval transaction with default gas settings
+                    const approveTx = await ERC20.approve(allowanceTarget, balance);
                     
                     logger.info(`⏳ Approval tx sent: ${approveTx.hash}`);
                     const approvalReceipt = await approveTx.wait(1);
@@ -523,18 +350,8 @@ export class TokenSwapService {
                 throw new Error('Invalid transaction data from aggregator');
             }
 
-            // Validate quote freshness
-            const quoteAge = Date.now() - (result.bestQuote.quote.timestamp || Date.now());
-            if (quoteAge > 30000) {
-                logger.warn(`⚠️ Quote is ${quoteAge}ms old, refreshing...`);
-                throw new Error('Quote too old, retry needed');
-            }
-
-            // Small delay to avoid same-block submission issues
-            await new Promise(resolve => setTimeout(resolve, 1000));
-
-            // Send transaction with enhanced gas handling
-            const receipt = await this.sendAndWait(txReq, 60_000, attempts);
+            // Send transaction with default gas settings from quote
+            const receipt = await this.sendAndWait(txReq, 60_000);
 
             logger.info(`🎉 SELL EXECUTED: ${position.tokenName} - ${receipt.hash}`);
 
@@ -585,26 +402,16 @@ export class TokenSwapService {
             const errorMessage = error instanceof Error ? error.message : String(error);
             logger.error(`❌ Sell failed for ${position.tokenName}: ${errorMessage}`);
 
-            // Check if error is retryable
-            const isRetryable = 
-                errorMessage.includes('Return amount is not enough') ||
-                errorMessage.includes('Quote too old') ||
-                errorMessage.includes('Gas estimation failed') ||
-                errorMessage.includes('timeout');
-
-            if (isRetryable && (!isRetry || !this.failedTransactions.has(txKey))) {
-                const currentFailed = this.failedTransactions.get(txKey);
+            if (!isRetry || !this.failedTransactions.has(txKey)) {
                 this.failedTransactions.set(txKey, {
                     transaction: position,
                     type: 'sell',
-                    attempts: currentFailed ? currentFailed.attempts + 1 : (isRetry ? 1 : 0),
+                    attempts: isRetry ? 1 : 0,
                     lastError: errorMessage,
                     lastAttempt: Date.now(),
                     reason
                 });
-                logger.info(`📝 Added to retry queue: ${txKey} (attempts: ${this.failedTransactions.get(txKey)!.attempts})`);
-            } else if (!isRetryable) {
-                logger.error(`❌ Non-retryable error, skipping: ${errorMessage}`);
+                logger.info(`📝 Added to retry queue: ${txKey}`);
             }
         }
     }

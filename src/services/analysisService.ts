@@ -235,11 +235,11 @@ class AnalysisService {
     }
 
     if (buyRating >= 6) {
-      logger.info(`Condition Passed: ${buyRating}, Violations:  ${violations}`)
+      logger.info(`Condition Passed: ${buyRating}, Violations:  ${JSON.stringify(violations)}`)
       return true
     }
 
-    logger.info(`Condition Failed: ${buyRating}, Violations:  ${violations}`)
+    logger.info(`Condition Failed: ${buyRating}, Violations:  ${JSON.stringify(violations)}`)
     return false;
   }
 

@@ -45,25 +45,10 @@ class QuoteAggregator {
   }
 
   /**
-   * Normalize token address to 1inch format
+   * Normalize token address
    * Returns the standard native token address if it's BNB
    */
-  private normalize1inchToken(token: string): string {
-    if (
-      token === this.WBNB_ADDRESS ||
-      token === this.NATIVE_TOKEN ||
-      token?.toLowerCase() === '0x0000000000000000000000000000000000000000'
-    ) {
-      return this.NATIVE_TOKEN;
-    }
-    return token;
-  }
-
-  /**
-   * Normalize token address to LiFi format
-   * For native token, use null; otherwise use the token address
-   */
-  private normalizeLiFiToken(token: string): string | null {
+  private normalizeToken(token: string): string {
     if (
       token === this.WBNB_ADDRESS ||
       token === this.NATIVE_TOKEN ||
@@ -80,8 +65,8 @@ class QuoteAggregator {
    */
   private async get1inchQuote(params: QuoteParams): Promise<QuoteResult | null> {
     try {
-      const src = this.normalize1inchToken(params.sellToken);
-      const dst = this.normalize1inchToken(params.buyToken);
+      const src = this.normalizeToken(params.sellToken);
+      const dst = this.normalizeToken(params.buyToken);
 
       const swapParams = {
         src,
@@ -142,8 +127,8 @@ class QuoteAggregator {
       logger.info(`Fetching LiFi quote...`);
 
       // For same-chain swaps, both fromChain and toChain are the same
-      const fromToken = this.normalizeLiFiToken(params.sellToken);
-      const toToken = this.normalizeLiFiToken(params.buyToken);
+      const fromToken = this.normalizeToken(params.sellToken);
+      const toToken = this.normalizeToken(params.buyToken);
 
       const quoteParams: any = {
         fromChain: this.CHAIN_ID.toString(),
@@ -394,7 +379,6 @@ class QuoteAggregator {
       }
 
       // For LiFi quotes - FIXED: Use transactionRequest from the main quote object
-      // The quote structure is: { transactionRequest: {...}, estimate: {...}, ... }
       if (provider === 'LiFi') {
         const txRequest = quote.transactionRequest;
         
@@ -410,8 +394,8 @@ class QuoteAggregator {
           data: txRequest.data,
           value: txRequest.value || '0',
           gas: txRequest.gasLimit ? parseInt(txRequest.gasLimit, 16).toString() : undefined,
-          gasPrice: undefined, // LiFi doesn't include gasPrice in transactionRequest
-          from: quote.action?.fromAddress, // From address may be in action object
+          gasPrice: txRequest.gasPrice ? parseInt(txRequest.gasPrice, 16).toString() : undefined,
+          from: txRequest.from,
         };
       }
 
