@@ -176,7 +176,6 @@ export class TokenSwapService {
                 buyToken: transaction.ca,
                 sellAmount: amountInWei.toString(),
                 taker: this.walletAddress,
-                slippage: '1',
             });
 
             if (!result) {
@@ -307,7 +306,6 @@ export class TokenSwapService {
                 buyToken: monitoringService.NATIVE_TOKEN_TRADES,
                 sellAmount: balance.toString(),
                 taker,
-                slippage: '1',
             });
 
             if (!result) {

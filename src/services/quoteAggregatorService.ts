@@ -75,7 +75,7 @@ class QuoteAggregator {
         from: params.taker,
         origin: params.taker,
         disableEstimate: 'true',
-        slippage: params.slippage || '1',
+        slippage: params.slippage || '10',
       };
 
       const swapUrl = `${this.ONEINCH_BASE_URL}/swap?${new URLSearchParams(swapParams).toString()}`;
@@ -138,7 +138,7 @@ class QuoteAggregator {
         fromAmount: params.sellAmount,
         fromAddress: params.taker,
         allowUserInSimulation: 'true',
-        slippage: (Number(params.slippage || '1') / 100).toString(), // LiFi uses decimal format (0.01 for 1%)
+        slippage: (Number(params.slippage || '10') / 100).toString(), // LiFi uses decimal format (0.01 for 1%)
       };
 
       // Remove undefined keys for cleaner API call
@@ -372,13 +372,13 @@ class QuoteAggregator {
           to: quote.tx.to,
           data: quote.tx.data,
           value: quote.tx.value || '0',
-          gas: quote.tx.gas,
-          gasPrice: quote.tx.gasPrice,
+          gasLimit: quote.tx.gas,
+          ...(quote.tx.gasPrice && { gasPrice: quote.tx.gasPrice }),
           from: quote.tx.from,
         };
       }
 
-      // For LiFi quotes - FIXED: Use transactionRequest from the main quote object
+      // For LiFi quotes
       if (provider === 'LiFi') {
         const txRequest = quote.transactionRequest;
         
@@ -387,14 +387,22 @@ class QuoteAggregator {
           throw new Error('LiFi quote does not contain transactionRequest');
         }
 
-        // LiFi transactionRequest structure: { to, data, value, gasLimit }
-        // gasLimit is in hex format
         return {
           to: txRequest.to,
           data: txRequest.data,
           value: txRequest.value || '0',
-          gas: txRequest.gasLimit ? parseInt(txRequest.gasLimit, 16).toString() : undefined,
-          gasPrice: txRequest.gasPrice ? parseInt(txRequest.gasPrice, 16).toString() : undefined,
+          gasLimit: txRequest.gasLimit ? 
+            (typeof txRequest.gasLimit === 'string' && txRequest.gasLimit.startsWith('0x') 
+              ? parseInt(txRequest.gasLimit, 16).toString() 
+              : txRequest.gasLimit) 
+            : undefined,
+          ...(txRequest.gasPrice && {
+            gasPrice: typeof txRequest.gasPrice === 'string' && txRequest.gasPrice.startsWith('0x')
+              ? parseInt(txRequest.gasPrice, 16).toString()
+              : txRequest.gasPrice
+          }),
+          ...(txRequest.maxFeePerGas && { maxFeePerGas: txRequest.maxFeePerGas }),
+          ...(txRequest.maxPriorityFeePerGas && { maxPriorityFeePerGas: txRequest.maxPriorityFeePerGas }),
           from: txRequest.from,
         };
       }
