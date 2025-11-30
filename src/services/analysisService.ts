@@ -184,43 +184,62 @@ class AnalysisService {
     const { marketCap, top10HoldersPercentage, liquidity, holders, holdersSmartMoneyPercent, holdersInfluencersPercent, count5m, volume24h } = data;
 
     let buyRating: number = 0;
+    const violations = [];
 
     if (parseFloat(holders) >= 300 && parseFloat(holders) <= 2500) {
       buyRating += 1;
+    } else {
+      violations.push({holders});
     }
 
     if (parseFloat(top10HoldersPercentage) <= 35) {
       buyRating += 1;
+    } else {
+      violations.push({top10HoldersPercentage});
     }
 
     if (parseFloat(liquidity) >= parseFloat(marketCap) * 0.45) {
       buyRating += 1;
+    } else {
+      violations.push({liquidity});
     }
 
     if (parseFloat(holdersSmartMoneyPercent) >= 0.1 && parseFloat(holdersSmartMoneyPercent) < 6) {
       buyRating += 1;
+    } else {
+      violations.push({holdersSmartMoneyPercent});
     }
 
     if (parseFloat(holdersInfluencersPercent) >= 0.1 && parseFloat(holdersInfluencersPercent) < 6) {
       buyRating += 1;
+    } else {
+      violations.push({holdersInfluencersPercent});
     }
 
     if (parseFloat(count5m) >= 170) {
       buyRating += 1;
+    } else {
+      violations.push({count5m});
     }
 
     if (parseFloat(volume24h) >= parseFloat(marketCap) * 0.30) {
       buyRating += 1;
+    } else {
+      violations.push({volume24h});
     }
 
     if (parseFloat(marketCap) <= 5000000) {
       buyRating += 1;
+    } else {
+      violations.push({marketCap});
     }
 
     if (buyRating >= 6) {
+      logger.info(`Condition Passed: ${buyRating}, Violations:  ${violations}`)
       return true
     }
 
+    logger.info(`Condition Failed: ${buyRating}, Violations:  ${violations}`)
     return false;
   }
 
