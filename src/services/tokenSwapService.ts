@@ -137,7 +137,7 @@ export class TokenSwapService {
         
         try {
 
-            if (!isBuyAllowed || Number(transaction.txUsdValue) < 400) {
+            if (!isBuyAllowed || Number(transaction.txUsdValue) < 200) {
                 logger.warn(`⚠️ Buy not allowed for ${txKey}`);
                 return null;
             }
