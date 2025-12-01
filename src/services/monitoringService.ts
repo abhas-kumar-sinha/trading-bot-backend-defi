@@ -22,8 +22,8 @@ class MonitoringService {
   private readonly MAX_RECONNECT_ATTEMPTS = 5;
   private readonly RECONNECT_DELAY = 5000;
   public readonly MAX_OPEN_POSITIONS = 5; // Maximum number of concurrent positions
-  private readonly STOP_LOSS_PERCENTAGE = -20; // Stop loss at -20%
-  private readonly SMART_STOP_LOSS_PERCENTAGE = -35; // Smart money stop loss at -35%
+  private readonly STOP_LOSS_PERCENTAGE = -16; // Stop loss at -16%
+  private readonly SMART_STOP_LOSS_PERCENTAGE = -30; // Smart money stop loss at -30%
   public readonly NATIVE_TOKEN_TRADES: string = "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE";
   public readonly NATIVE_TOKEN_DATA: string = "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c";
   

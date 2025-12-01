@@ -42,6 +42,7 @@ export class TokenSwapService {
 
     private readonly TRADE_THRESHOLDS = {
         BASE_PROFIT_TARGET: 10,
+        BASE_PROFIT_TARGET_EXTREME_TOKEN: 7.5
     };
 
     constructor() {
@@ -225,7 +226,7 @@ export class TokenSwapService {
                 myBuyOrderTx: this.jsonObjectBigIntSafe(receipt),
                 tokenDetails: tokenDetails,
                 smartMoneyConfirmation: false,
-                profitTarget: this.TRADE_THRESHOLDS.BASE_PROFIT_TARGET
+                profitTarget: (marketCap < 100000 || marketCap > 1000000) ? this.TRADE_THRESHOLDS.BASE_PROFIT_TARGET_EXTREME_TOKEN : this.TRADE_THRESHOLDS.BASE_PROFIT_TARGET
             };
 
             analysisService.activePositions.set(receipt.hash, position);
@@ -302,6 +303,7 @@ export class TokenSwapService {
                 buyToken: monitoringService.NATIVE_TOKEN_TRADES,
                 sellAmount: balance.toString(),
                 taker,
+                slippage: "10"
             });
 
             if (!result) {
