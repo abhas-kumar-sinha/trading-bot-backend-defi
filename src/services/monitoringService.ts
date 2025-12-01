@@ -21,7 +21,7 @@ class MonitoringService {
   private readonly MAX_ALERTS = 1000;
   private readonly MAX_RECONNECT_ATTEMPTS = 5;
   private readonly RECONNECT_DELAY = 5000;
-  private readonly MAX_OPEN_POSITIONS = 5; // Maximum number of concurrent positions
+  public readonly MAX_OPEN_POSITIONS = 5; // Maximum number of concurrent positions
   private readonly STOP_LOSS_PERCENTAGE = -20; // Stop loss at -20%
   private readonly SMART_STOP_LOSS_PERCENTAGE = -35; // Smart money stop loss at -35%
   public readonly NATIVE_TOKEN_TRADES: string = "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE";
@@ -167,16 +167,8 @@ class MonitoringService {
               continue;
             }
             
-            const position = await this.tokenSwapService.executeBuyOrder(transaction);
-            if (position) {
-              this.purchasedTokens.add(tokenCALower);
-              this.connectWebSocket(position.tokenCA, position.tokenSymbol);
-              
-              logger.info(
-                `✅ New position opened for ${position.tokenSymbol} ` +
-                `(${this.activeWebSockets.size}/${this.MAX_OPEN_POSITIONS})`
-              );
-            }
+            await this.tokenSwapService.executeBuyOrder(transaction);
+
           }
           // Execute sell order and close WebSocket
           else if (alert.type === 'FOLLOWING_SELL') {
@@ -198,7 +190,7 @@ class MonitoringService {
   /**
    * Connect WebSocket for real-time price updates
    */
-  private connectWebSocket(tokenCA: string, tokenSymbol: string): void {
+  public connectWebSocket(tokenCA: string, tokenSymbol: string): void {
     const lowerCA = tokenCA.toLowerCase();
     
     // Check if already connected

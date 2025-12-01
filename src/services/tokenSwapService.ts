@@ -234,6 +234,14 @@ export class TokenSwapService {
             logger.info(`💰 POSITION OPENED: ${position.tokenSymbol} at $${price} (MC: $${marketCap.toLocaleString()})`);
             
             this.pendingBuyingTokens.delete(txKey);
+
+            monitoringService.purchasedTokens.add(position.tokenCA.toLowerCase());
+            monitoringService.connectWebSocket(position.tokenCA, position.tokenSymbol);
+            
+            logger.info(
+            `✅ New position opened for ${position.tokenSymbol} ` +
+            `(${monitoringService.activeWebSockets.size}/${monitoringService.MAX_OPEN_POSITIONS})`
+            );
             
             if (isRetry) {
                 this.failedTransactions.delete(txKey);
