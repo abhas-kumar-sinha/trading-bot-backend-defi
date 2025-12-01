@@ -58,8 +58,6 @@ class QuoteAggregator {
    */
   private async getLiFiQuote(params: QuoteParams): Promise<QuoteResult | null> {
     try {
-      logger.info(`Fetching LiFi quote...`);
-
       const fromToken = this.normalizeToken(params.sellToken);
       const toToken = this.normalizeToken(params.buyToken);
 
@@ -71,7 +69,7 @@ class QuoteAggregator {
         fromAmount: params.sellAmount,
         fromAddress: params.taker,
         allowUserInSimulation: 'true',
-        slippage: (Number(params.slippage || '10') / 100).toString(),
+        slippage: (Number(params.slippage || '15') / 100).toString(),
       };
 
       Object.keys(quoteParams).forEach(
