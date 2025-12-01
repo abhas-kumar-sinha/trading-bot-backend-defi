@@ -303,7 +303,7 @@ export class TokenSwapService {
                 buyToken: monitoringService.NATIVE_TOKEN_TRADES,
                 sellAmount: balance.toString(),
                 taker,
-                slippage: "10"
+                slippage: "4"
             });
 
             if (!result) {
