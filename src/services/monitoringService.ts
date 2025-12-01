@@ -506,7 +506,7 @@ class MonitoringService {
         
         if (diffSec > analysisService.ANALYSIS_THRESHOLDS.SMARTMONEY_CONFIRMATION_TIMEOUT) {
           position.smartMoneyConfirmation = false;
-          position.profitTarget = analysisService.ANALYSIS_THRESHOLDS.BASE_PROFIT_TARGET;
+          position.profitTarget = (position.entryMarketCap <= 100000 || position.entryMarketCap >= 1000000) ? analysisService.ANALYSIS_THRESHOLDS.BASE_PROFIT_TARGET_EXTREME : analysisService.ANALYSIS_THRESHOLDS.BASE_PROFIT_TARGET;
           
           analysisService.updatePositionMetadataToDb(position);
           
