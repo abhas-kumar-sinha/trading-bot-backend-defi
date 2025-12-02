@@ -199,7 +199,7 @@ export class TokenSwapService {
 
             const isBuyAllowed = analysisService.checkBuyConditions(currentMarketDynamics, transaction.tokenName);
 
-            if (!isBuyAllowed || Number(transaction.txUsdValue) < 400) {
+            if (!isBuyAllowed || Number(transaction.txUsdValue) < 200) {
                 this.pendingBuyingTokens.delete(tokenCA);
                 return null;
             }
