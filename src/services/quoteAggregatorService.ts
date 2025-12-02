@@ -54,7 +54,7 @@ class QuoteAggregator {
   }
 
   /**
-   * Fetches quote from LiFi API
+   * OPTIMIZED: Fetches quote from LiFi API with reduced timeout
    */
   private async getLiFiQuote(params: QuoteParams): Promise<QuoteResult | null> {
     try {
@@ -77,8 +77,10 @@ class QuoteAggregator {
       );
 
       const quoteUrl = `${this.LIFI_BASE_URL}/quote?${new URLSearchParams(quoteParams).toString()}`;
+
+      // OPTIMIZATION: Reduced timeout from 15s to 8s for faster failure
       const quoteRes = await axios.get(quoteUrl, { 
-        timeout: 15000,
+        timeout: 8000,
         headers: {
           'x-lifi-api-key': this.LIFI_API_KEY || ''
         }
@@ -86,10 +88,10 @@ class QuoteAggregator {
       const quote = quoteRes.data;
 
       if (!quote || !quote.estimate || !quote.estimate.toAmount) {
-        logger.warn(`LiFi: No quote available`);
         return null;
       }
 
+      // OPTIMIZATION: Simplified gas calculation
       const gasCosts = quote.estimate.gasCosts || [];
       const totalGasEstimate = gasCosts.reduce((sum: number, cost: any) => {
         return sum + Number(cost.estimate || 0);
@@ -98,10 +100,7 @@ class QuoteAggregator {
       const estimatedGas = totalGasEstimate > 0 ? totalGasEstimate.toString() : '500000';
       const gasPrice = gasCosts[0]?.price;
 
-      if (gasPrice) {
-        logger.info(`LiFi gas price: ${Number(gasPrice) / 1e9} Gwei`);
-      }
-      logger.info(`LiFi using tool: ${quote.tool}`);
+      // OPTIMIZATION: Removed excessive logging
 
       return {
         provider: 'LiFi',
@@ -113,17 +112,18 @@ class QuoteAggregator {
         allowanceTarget: quote.estimate.approvalAddress,
       };
     } catch (error: any) {
-      logger.error(`LiFi quote failed: ${error.response?.data?.message || error.message}`);
+      // OPTIMIZATION: Simplified error logging
+      logger.error(`LiFi quote failed: ${error.message}`);
       return null;
     }
   }
 
   /**
-   * Calculate net value after gas costs
+   * OPTIMIZED: Calculate net value (simplified)
    */
   private calculateNetValue(quote: QuoteResult, isBuyingNative: boolean): string {
     const buyAmount = BigInt(quote.buyAmount);
-    
+
     if (isBuyingNative && quote.estimatedGas && quote.gasPrice) {
       const gasLimit = BigInt(quote.estimatedGas);
       const gasPrice = BigInt(quote.gasPrice);
@@ -131,15 +131,14 @@ class QuoteAggregator {
       const netValue = buyAmount - gasCost;
       return netValue > 0n ? netValue.toString() : '0';
     }
-    
+
     return buyAmount.toString();
   }
 
   /**
-   * Get best quote from LiFi
+   * OPTIMIZED: Get best quote from LiFi with minimal logging
    */
   async getBestQuote(params: QuoteParams): Promise<AggregatedQuoteResult | null> {
-    logger.info(`🔍 Fetching quote from LiFi aggregator...`);
 
     const isBuyingNative = 
       params.buyToken === this.WBNB_ADDRESS ||
@@ -149,25 +148,11 @@ class QuoteAggregator {
     const lifiQuote = await this.getLiFiQuote(params);
 
     if (!lifiQuote) {
-      logger.error('❌ No valid quote from LiFi');
+      logger.error('❌ No quote from LiFi');
       return null;
     }
 
     lifiQuote.netValue = this.calculateNetValue(lifiQuote, isBuyingNative);
-
-    logger.info(`\n✅ Quote from ${lifiQuote.provider}`);
-    logger.info(`   Buy amount: ${lifiQuote.buyAmount}`);
-    logger.info(`   Net value (after gas): ${lifiQuote.netValue}`);
-    logger.info(`   Estimated gas: ${lifiQuote.estimatedGas}`);
-
-    if (lifiQuote.gasPrice) {
-      const gasCost = BigInt(lifiQuote.estimatedGas || '500000') * BigInt(lifiQuote.gasPrice);
-      const gasCostBNB = Number(gasCost) / 1e18;
-      const gasPriceGwei = Number(lifiQuote.gasPrice) / 1e9;
-      
-      logger.info(`   Gas price: ${gasPriceGwei.toFixed(2)} Gwei`);
-      logger.info(`   Gas units: ${lifiQuote.estimatedGas} (${gasCostBNB.toFixed(6)} BNB)`);
-    }
 
     return {
       bestQuote: lifiQuote,
@@ -175,26 +160,22 @@ class QuoteAggregator {
   }
 
   /**
-   * Get quote from LiFi
+   * Get quote from LiFi (kept for compatibility)
    */
   async getAllBestQuote(params: QuoteParams): Promise<QuoteResult[] | null> {
-    logger.info('🔍 Fetching quote from LiFi aggregator...');
-    
     const isBuyingNative = 
       params.buyToken === this.WBNB_ADDRESS ||
       params.buyToken === this.NATIVE_TOKEN ||
       params.buyToken?.toLowerCase() === '0x0000000000000000000000000000000000000000';
-    
+
     const lifiQuote = await this.getLiFiQuote(params);
-    
+
     if (!lifiQuote) {
-      logger.error('❌ No valid quote from LiFi');
       return null;
     }
 
     lifiQuote.netValue = this.calculateNetValue(lifiQuote, isBuyingNative);
-    logger.info('✅ LiFi quote retrieved successfully');
-    
+
     return [lifiQuote];
   }
 
