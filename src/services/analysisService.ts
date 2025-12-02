@@ -205,13 +205,13 @@ class AnalysisService {
       violations.push({liquidity});
     }
 
-    if (parseFloat(holdersSmartMoneyPercent) >= 0.1 && parseFloat(holdersSmartMoneyPercent) < 8) {
+    if (parseFloat(holdersSmartMoneyPercent) >= 0.1 && parseFloat(holdersSmartMoneyPercent) < 10) {
       buyRating += 1;
     } else {
       violations.push({holdersSmartMoneyPercent});
     }
 
-    if (parseFloat(holdersInfluencersPercent) >= 0.1 && parseFloat(holdersInfluencersPercent) < 8) {
+    if (parseFloat(holdersInfluencersPercent) >= 0.1 && parseFloat(holdersInfluencersPercent) < 10) {
       buyRating += 1;
     } else {
       violations.push({holdersInfluencersPercent});
@@ -240,7 +240,7 @@ class AnalysisService {
       return true
     }
 
-    logger.info(`Condition Failed: ${buyRating}, Violations:  ${JSON.stringify(violations)}`)
+    logger.info(`Condition Failed: ${8 - buyRating}, Violations:  ${JSON.stringify(violations)}`)
     return false;
   }
 

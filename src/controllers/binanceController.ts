@@ -121,7 +121,7 @@ export class BinanceController {
       res.json({
         success: true,
         count: cachedData.following.length,
-        data: cachedData.following.slice(0, 40) // Return latest 40
+        data: cachedData.following.filter((item) => parseFloat(item.marketCap) >= 30000).slice(0, 40)
       });
     } catch (error) {
       logger.error('Error getting following activity:', error);

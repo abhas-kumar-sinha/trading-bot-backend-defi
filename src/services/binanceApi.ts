@@ -173,6 +173,29 @@ class BinanceApiService {
     }
   }
 
+  async getFollowingList(): Promise<SmartMoneyTransaction[]> {
+    try {
+      const response = await this.privateAxiosInstance.post<ApiResponse<SmartMoneyTransaction[]>>(
+        '/wallet-direct/tracker/wallet/address/search',
+        {
+          chainId: "56",
+          groupId: 52064
+        },
+        {
+          headers: this.getPrivateHeaders('https://web3.binance.com/en/trackers?chain=bsc') as any
+        }
+      );
+
+      if (response.data.success) {
+        return response.data.data;
+      }
+      return [];
+    } catch (error) {
+      logger.info('Error fetching following transactions');
+      return [];
+    }
+  }
+
   async getSocialTweets(): Promise<any> {
     try {
       const response = await this.privateAxiosInstancev2.post<any>(
