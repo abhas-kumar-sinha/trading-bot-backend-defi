@@ -65,7 +65,7 @@ export class TokenSwapService {
      * Wait for confirmation and execute callbacks based on result
      */
     private async waitForConfirmationWithCallback(
-        hash: string, 
+        hash: string,
         onSuccess: (receipt: TransactionReceipt) => void | Promise<void>,
         onFailure: (error: Error) => void | Promise<void>,
         timeoutMs = 30_000
@@ -78,7 +78,7 @@ export class TokenSwapService {
                 return;
             }
 
-            const timeout = new Promise<never>((_, rej) => 
+            const timeout = new Promise<never>((_, rej) =>
                 setTimeout(() => rej(new Error("Transaction timeout")), timeoutMs)
             );
 
@@ -296,7 +296,7 @@ export class TokenSwapService {
                     );
 
                     // Save to DB
-                    await dbService.savePositionToDB(position).catch(err => 
+                    await dbService.savePositionToDB(position).catch(err =>
                         logger.error('DB save failed:', err)
                     );
 
@@ -449,7 +449,7 @@ export class TokenSwapService {
                     );
 
                     // Save to DB
-                    await dbService.saveSellToDB(sellRecord).catch(err => 
+                    await dbService.saveSellToDB(sellRecord).catch(err =>
                         logger.error('DB save failed:', err)
                     );
 

@@ -148,23 +148,6 @@ export class BinanceController {
       });
     }
   }
-
-  async getWalletBalance(req: Request, res: Response) {
-    try {
-      const walletBalance = await analysisService.getWalletBalance();
-      res.json({
-        success: true,
-        count: walletBalance.length,
-        data: walletBalance
-      });
-    } catch (error) {
-      logger.error('Error getting wallet balance:', error);
-      res.status(500).json({
-        success: false,
-        error: 'Failed to fetch wallet balance'
-      });
-    }
-  }
     
 }
 

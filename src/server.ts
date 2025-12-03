@@ -7,6 +7,7 @@ import logger from './utils/logger';
 import tokenController from './controllers/tokenController';
 import binanceController from './controllers/binanceController';
 import TradeController from './controllers/tradeController';
+import walletController from './controllers/walletController';
 
 // Load environment variables
 dotenv.config();
@@ -55,7 +56,10 @@ app.get('/', (req, res) => {
         active: '/api/positions',
         closed: '/api/closed-positions',
       },
-      walletBalance: '/api/wallet-balance',
+      wallet: {
+        walletBalance: '/api/wallet-balance',
+        walletTokens: '/api/wallet-tokens/:address/:chain',
+      },
       control: {
         start: '/api/monitoring/start',
         stop: '/api/monitoring/stop'
@@ -81,7 +85,6 @@ app.get('/api/smart-money', binanceController.getSmartMoneyActivity);
 app.get('/api/kol', binanceController.getKOLActivity);
 app.get('/api/following', binanceController.getFollowingActivity);
 app.get('/api/social-tweets', binanceController.getSocialTweets);
-app.get('/api/wallet-balance', binanceController.getWalletBalance);
 
 //monitoring services
 app.get('/api/alerts', monitoringController.getAlerts);
@@ -99,6 +102,10 @@ app.get('/api/token/:address/details', tokenController.getTokenDetails);
 app.get('/api/token/:address/market-dynamics', tokenController.getTokenMarketDynamics);
 app.get('/api/token/:address/analysis', tokenController.getTokenAnalysis);
 app.get('/api/token-icon', tokenController.getTokenIcon);
+
+//wallet services
+app.get('/api/wallet-balance', walletController.getWalletBalance);
+app.get('/api/wallet-tokens/:address/:chain', walletController.getWalletTokens);
 
 //trade services
 app.get('/api/trade/quotes', TradeController.getTradeQuotes);
