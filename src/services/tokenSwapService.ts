@@ -31,10 +31,14 @@ export class TokenSwapService {
     private pendingBuyingTokens: Set<string> = new Set();
     private pendingSellingTokens: Set<string> = new Set();
 
+    // Track tokens in buy retry cooldown to prevent duplicate signals
+    private tokensInBuyRetry: Set<string> = new Set();
+
     // Failed transactions queue
     private failedTransactions: Map<string, FailedTransaction> = new Map();
     private readonly MAX_RETRY_ATTEMPTS = 2;
-    private readonly RETRY_DELAY_MS = 2000;
+    private readonly RETRY_DELAY_BUY_MS = 30000; // 30 seconds for buy retries
+    private readonly RETRY_DELAY_SELL_MS = 2000; // 2 seconds for sell retries
     private retryInterval: NodeJS.Timeout | null = null;
 
     // Trade variables
@@ -155,10 +159,18 @@ export class TokenSwapService {
         const now = Date.now();
 
         for (const [key, failed] of this.failedTransactions.entries()) {
-            if (now - failed.lastAttempt < this.RETRY_DELAY_MS) continue;
+            // Use different retry delays for buy and sell
+            const retryDelay = failed.type === 'buy' ? this.RETRY_DELAY_BUY_MS : this.RETRY_DELAY_SELL_MS;
+            if (now - failed.lastAttempt < retryDelay) continue;
 
             if (failed.attempts >= this.MAX_RETRY_ATTEMPTS) {
                 this.failedTransactions.delete(key);
+                // Clean up buy retry tracking when max attempts reached
+                if (failed.type === 'buy') {
+                    const tokenCA = (failed.transaction as SmartMoneyTransaction).ca.toLowerCase();
+                    this.tokensInBuyRetry.delete(tokenCA);
+                    logger.info(`🔓 Token ${tokenCA} removed from buy retry cooldown after max attempts`);
+                }
                 continue;
             }
 
@@ -170,6 +182,11 @@ export class TokenSwapService {
                 }
 
                 this.failedTransactions.delete(key);
+                // Clean up buy retry tracking on successful retry
+                if (failed.type === 'buy') {
+                    const tokenCA = (failed.transaction as SmartMoneyTransaction).ca.toLowerCase();
+                    this.tokensInBuyRetry.delete(tokenCA);
+                }
             } catch (error) {
                 failed.attempts++;
                 failed.lastAttempt = now;
@@ -186,6 +203,12 @@ export class TokenSwapService {
             // Check if we're already buying this token
             if (!isRetry && this.pendingBuyingTokens.has(tokenCA)) {
                 logger.warn(`⚠️ Buy order already pending for token ${transaction.tokenName} (${tokenCA})`);
+                return null;
+            }
+
+            // Check if this token is in buy retry cooldown (prevent duplicate signals from other smart money)
+            if (!isRetry && this.tokensInBuyRetry.has(tokenCA)) {
+                logger.warn(`⏱️ Token ${transaction.tokenName} (${tokenCA}) is in buy retry cooldown, skipping duplicate signal`);
                 return null;
             }
 
@@ -219,6 +242,7 @@ export class TokenSwapService {
                 buyToken: transaction.ca,
                 sellAmount: amountInWei.toString(),
                 taker: this.walletAddress,
+                slippage: isRetry ? "25" : "15",
             });
 
             if (!result) throw new Error("No valid quotes available");
@@ -321,7 +345,9 @@ export class TokenSwapService {
                             lastError: error.message,
                             lastAttempt: Date.now()
                         });
-                        logger.info(`📝 Buy failed, added to retry queue: ${txKey}`);
+                        // Add token to retry cooldown to prevent duplicate signals
+                        this.tokensInBuyRetry.add(tokenCA);
+                        logger.info(`📝 Buy failed, added to retry queue (30s cooldown): ${txKey}`);
                     }
                 }
             );
@@ -347,6 +373,9 @@ export class TokenSwapService {
                     lastError: errorMessage,
                     lastAttempt: Date.now()
                 });
+                // Add token to retry cooldown to prevent duplicate signals
+                this.tokensInBuyRetry.add(tokenCA);
+                logger.info(`📝 Buy error, added to retry queue (30s cooldown): ${txKey}`);
             }
 
             return null;
