@@ -8,7 +8,7 @@ class AnalysisService {
   public activePositions: Map<string, TradePositionExtended> = new Map(); // token entry Txn Hash -> position
   private dbInitialized = false;
   public readonly ANALYSIS_THRESHOLDS = {
-    MIN_MARKET_CAP: 50000, // 50K min market cap
+    MIN_MARKET_CAP: 100000, // 100K min market cap
     MAX_RISK_LEVEL: 3,
     BASE_PROFIT_TARGET: 10, // 10% base profit,
     BASE_PROFIT_TARGET_EXTREME: 7.5, // 7.5% base profit for extreme risk level
