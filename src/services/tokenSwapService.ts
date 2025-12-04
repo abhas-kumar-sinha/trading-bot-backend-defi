@@ -16,6 +16,14 @@ interface FailedTransaction {
     reason?: string;
 }
 
+interface BlacklistedToken {
+    tokenCA: string;
+    tokenSymbol: string;
+    failureCount: number;
+    lastFailureTime: number;
+    errors: string[];
+}
+
 export class TokenSwapService {
 
     private aggregator: QuoteAggregator;
@@ -31,15 +39,17 @@ export class TokenSwapService {
     private pendingBuyingTokens: Set<string> = new Set();
     private pendingSellingTokens: Set<string> = new Set();
 
-    // Track tokens in buy retry cooldown to prevent duplicate signals
-    private tokensInBuyRetry: Set<string> = new Set();
-
-    // Failed transactions queue
+    // 🔧 FIX: Changed to use TOKEN CA as key instead of txHash
+    // This prevents multiple signals for the same token from bypassing retry logic
     private failedTransactions: Map<string, FailedTransaction> = new Map();
-    private readonly MAX_RETRY_ATTEMPTS = 2;
+    private readonly MAX_RETRY_ATTEMPTS = 1;
     private readonly RETRY_DELAY_BUY_MS = 30000; // 30 seconds for buy retries
     private readonly RETRY_DELAY_SELL_MS = 2000; // 2 seconds for sell retries
     private retryInterval: NodeJS.Timeout | null = null;
+
+    // 🆕 BLACKLIST FOR PERMANENTLY FAILED TOKENS
+    private blacklistedTokens: Map<string, BlacklistedToken> = new Map();
+    private readonly BLACKLIST_DURATION_MS = 24 * 60 * 60 * 1000; // 24 hours
 
     // Trade variables
     private readonly INR_TO_SPEND: number = Number(process.env.INR_TO_SPEND ?? 120);
@@ -55,6 +65,81 @@ export class TokenSwapService {
     constructor() {
         this.aggregator = new QuoteAggregator(this.LIFI_API_KEY);
         this.startRetryProcessor();
+        this.startBlacklistCleaner();
+    }
+
+    /**
+     * 🆕 Add token to blacklist after max retry failures
+     */
+    private addToBlacklist(tokenCA: string, tokenSymbol: string, error: string): void {
+        const key = tokenCA.toLowerCase();
+        const existing = this.blacklistedTokens.get(key);
+
+        if (existing) {
+            existing.failureCount++;
+            existing.lastFailureTime = Date.now();
+            existing.errors.push(error);
+        } else {
+            this.blacklistedTokens.set(key, {
+                tokenCA,
+                tokenSymbol,
+                failureCount: 1,
+                lastFailureTime: Date.now(),
+                errors: [error]
+            });
+        }
+
+        logger.warn(`🚫 Token ${tokenSymbol} (${tokenCA}) BLACKLISTED for 24h. Total failures: ${existing?.failureCount ?? 1}`);
+    }
+
+    /**
+     * 🆕 Check if token is blacklisted
+     */
+    private isBlacklisted(tokenCA: string): boolean {
+        return this.blacklistedTokens.has(tokenCA.toLowerCase());
+    }
+
+    /**
+     * 🆕 Start periodic blacklist cleaner (runs every hour)
+     */
+    private startBlacklistCleaner(): void {
+        setInterval(() => {
+            const now = Date.now();
+            let removedCount = 0;
+
+            for (const [key, blacklisted] of this.blacklistedTokens.entries()) {
+                if (now - blacklisted.lastFailureTime > this.BLACKLIST_DURATION_MS) {
+                    this.blacklistedTokens.delete(key);
+                    removedCount++;
+                    logger.info(`✅ Token ${blacklisted.tokenSymbol} removed from blacklist after 24h`);
+                }
+            }
+
+            if (removedCount > 0) {
+                logger.info(`🧹 Blacklist cleaned: ${removedCount} tokens removed`);
+            }
+        }, 60 * 60 * 1000); // Every hour
+    }
+
+    /**
+     * 🆕 Get current blacklist status
+     */
+    public getBlacklistedTokens(): BlacklistedToken[] {
+        return Array.from(this.blacklistedTokens.values());
+    }
+
+    /**
+     * 🆕 Manually remove token from blacklist
+     */
+    public removeFromBlacklist(tokenCA: string): boolean {
+        const key = tokenCA.toLowerCase();
+        if (this.blacklistedTokens.has(key)) {
+            const token = this.blacklistedTokens.get(key)!;
+            this.blacklistedTokens.delete(key);
+            logger.info(`✅ Token ${token.tokenSymbol} manually removed from blacklist`);
+            return true;
+        }
+        return false;
     }
 
     /**
@@ -164,13 +249,14 @@ export class TokenSwapService {
             if (now - failed.lastAttempt < retryDelay) continue;
 
             if (failed.attempts >= this.MAX_RETRY_ATTEMPTS) {
-                this.failedTransactions.delete(key);
-                // Clean up buy retry tracking when max attempts reached
+                // Add to blacklist before removing from retry queue
                 if (failed.type === 'buy') {
-                    const tokenCA = (failed.transaction as SmartMoneyTransaction).ca.toLowerCase();
-                    this.tokensInBuyRetry.delete(tokenCA);
-                    logger.info(`🔓 Token ${tokenCA} removed from buy retry cooldown after max attempts`);
+                    const tx = failed.transaction as SmartMoneyTransaction;
+                    this.addToBlacklist(tx.ca, tx.tokenName, failed.lastError);
                 }
+                
+                this.failedTransactions.delete(key);
+                logger.warn(`⚠️ Max retry attempts reached for ${key}, removed from queue`);
                 continue;
             }
 
@@ -181,34 +267,46 @@ export class TokenSwapService {
                     await this.executeSellOrder(failed.transaction as TradePositionExtended, failed.reason || 'retry', true);
                 }
 
+                // On successful retry, remove from failed queue
                 this.failedTransactions.delete(key);
-                // Clean up buy retry tracking on successful retry
-                if (failed.type === 'buy') {
-                    const tokenCA = (failed.transaction as SmartMoneyTransaction).ca.toLowerCase();
-                    this.tokensInBuyRetry.delete(tokenCA);
-                }
+                logger.info(`✅ Retry successful for ${key}`);
+                
             } catch (error) {
+                // Increment attempts on failure
                 failed.attempts++;
                 failed.lastAttempt = now;
                 failed.lastError = error instanceof Error ? error.message : String(error);
+                
+                logger.warn(`⚠️ Retry ${failed.attempts}/${this.MAX_RETRY_ATTEMPTS} failed for ${key}: ${failed.lastError}`);
             }
         }
     }
 
     async executeBuyOrder(transaction: SmartMoneyTransaction, isRetry: boolean = false): Promise<TradePositionExtended | null> {
-        const txKey = transaction.txHash;
+        // 🔧 FIX: Use TOKEN CA as key, not txHash!
         const tokenCA = transaction.ca.toLowerCase();
 
         try {
-            // Check if we're already buying this token
-            if (!isRetry && this.pendingBuyingTokens.has(tokenCA)) {
-                logger.warn(`⚠️ Buy order already pending for token ${transaction.tokenName} (${tokenCA})`);
+            // 🆕 CHECK BLACKLIST FIRST
+            if (this.isBlacklisted(tokenCA)) {
+                logger.warn(`🚫 Token ${transaction.tokenName} (${tokenCA}) is BLACKLISTED, skipping buy`);
                 return null;
             }
 
-            // Check if this token is in buy retry cooldown (prevent duplicate signals from other smart money)
-            if (!isRetry && this.tokensInBuyRetry.has(tokenCA)) {
-                logger.warn(`⏱️ Token ${transaction.tokenName} (${tokenCA}) is in buy retry cooldown, skipping duplicate signal`);
+            // 🔧 FIX: Check if token is in retry queue (prevents duplicate signals)
+            if (!isRetry && this.failedTransactions.has(tokenCA)) {
+                const failedTx = this.failedTransactions.get(tokenCA)!;
+                logger.warn(
+                    `⏱️ Token ${transaction.tokenName} is already in RETRY QUEUE ` +
+                    `(attempt ${failedTx.attempts + 1}/${this.MAX_RETRY_ATTEMPTS}), ` +
+                    `skipping duplicate signal`
+                );
+                return null;
+            }
+
+            // Check if we're already buying this token
+            if (!isRetry && this.pendingBuyingTokens.has(tokenCA)) {
+                logger.warn(`⚠️ Buy order already pending for token ${transaction.tokenName} (${tokenCA})`);
                 return null;
             }
 
@@ -234,7 +332,7 @@ export class TokenSwapService {
             const bnbToSpend = this.INR_TO_SPEND / (currentBNBPrice * 85);
             const amountInWei = parseUnits(bnbToSpend.toFixed(18), 18);
 
-            logger.info(`💵 Buy ${transaction.tokenName}: ${bnbToSpend.toFixed(6)} BNB`);
+            logger.info(`💵 Buy ${transaction.tokenName}: ${bnbToSpend.toFixed(6)} BNB ${isRetry ? '(RETRY)' : ''}`);
 
             // Get best quote
             const result = await this.aggregator.getBestQuote({
@@ -328,34 +426,41 @@ export class TokenSwapService {
                     this.preApproveTokenForSell(transaction.ca, transaction.tokenName).catch(err => {
                         logger.warn(`⚠️ Pre-approval failed: ${err.message}`);
                     });
+
+                    // 🔧 FIX: Remove from retry queue on success
+                    if (this.failedTransactions.has(tokenCA)) {
+                        this.failedTransactions.delete(tokenCA);
+                        logger.info(`✅ Token ${transaction.tokenName} removed from retry queue after successful buy`);
+                    }
                 },
                 // On Failure: Clean up and don't activate position
                 async (error) => {
                     logger.error(`❌ BUY FAILED ON-CHAIN: ${transaction.tokenName} - ${error.message}`);
 
-                    // Clean up - don't activate position
-                    this.pendingBuyingTokens.delete(tokenCA);
+                    // 🔧 FIX: Properly handle retry attempts
+                    const existing = this.failedTransactions.get(tokenCA);
+                    const currentAttempts = existing ? existing.attempts + 1 : (isRetry ? 1 : 0);
 
-                    // Log failed transaction for retry if not already retrying
-                    if (!isRetry || !this.failedTransactions.has(txKey)) {
-                        this.failedTransactions.set(txKey, {
+                    if (currentAttempts < this.MAX_RETRY_ATTEMPTS) {
+                        this.failedTransactions.set(tokenCA, {
                             transaction,
                             type: 'buy',
-                            attempts: isRetry ? 1 : 0,
+                            attempts: currentAttempts,
                             lastError: error.message,
                             lastAttempt: Date.now()
                         });
-                        // Add token to retry cooldown to prevent duplicate signals
-                        this.tokensInBuyRetry.add(tokenCA);
-                        logger.info(`📝 Buy failed, added to retry queue (30s cooldown): ${txKey}`);
+                        logger.info(`📝 Buy failed (attempt ${currentAttempts + 1}/${this.MAX_RETRY_ATTEMPTS}), added to retry queue: ${transaction.tokenName}`);
+                    } else {
+                        // Max attempts reached, blacklist the token
+                        this.addToBlacklist(transaction.ca, transaction.tokenName, error.message);
+                        this.failedTransactions.delete(tokenCA);
+                        logger.warn(`🚫 Max attempts reached, token blacklisted: ${transaction.tokenName}`);
                     }
                 }
             );
 
             // Release pending lock immediately after sending tx (not after confirmation)
             this.pendingBuyingTokens.delete(tokenCA);
-
-            if (isRetry) this.failedTransactions.delete(txKey);
 
             // Return position optimistically (will be activated only on confirmation)
             return position;
@@ -365,17 +470,24 @@ export class TokenSwapService {
             const errorMessage = error instanceof Error ? error.message : String(error);
             logger.error(`❌ Buy failed: ${errorMessage}`);
 
-            if (!isRetry || !this.failedTransactions.has(txKey)) {
-                this.failedTransactions.set(txKey, {
+            // 🔧 FIX: Properly handle retry attempts in catch block
+            const existing = this.failedTransactions.get(tokenCA);
+            const currentAttempts = existing ? existing.attempts + 1 : (isRetry ? 1 : 0);
+
+            if (currentAttempts < this.MAX_RETRY_ATTEMPTS) {
+                this.failedTransactions.set(tokenCA, {
                     transaction,
                     type: 'buy',
-                    attempts: isRetry ? 1 : 0,
+                    attempts: currentAttempts,
                     lastError: errorMessage,
                     lastAttempt: Date.now()
                 });
-                // Add token to retry cooldown to prevent duplicate signals
-                this.tokensInBuyRetry.add(tokenCA);
-                logger.info(`📝 Buy error, added to retry queue (30s cooldown): ${txKey}`);
+                logger.info(`📝 Buy error (attempt ${currentAttempts + 1}/${this.MAX_RETRY_ATTEMPTS}), added to retry queue: ${transaction.tokenName}`);
+            } else {
+                // Max attempts reached, blacklist the token
+                this.addToBlacklist(transaction.ca, transaction.tokenName, errorMessage);
+                this.failedTransactions.delete(tokenCA);
+                logger.warn(`🚫 Max attempts reached, token blacklisted: ${transaction.tokenName}`);
             }
 
             return null;
@@ -383,6 +495,7 @@ export class TokenSwapService {
     }
 
     async executeSellOrder(position: TradePositionExtended, reason: string, isRetry: boolean = false): Promise<void> {
+        // For sells, we still use entryTxHash as key since each position is unique
         const txKey = position.entryTxHash;
         const tokenCA = position.tokenCA.toLowerCase();
 
@@ -465,7 +578,7 @@ export class TokenSwapService {
                 profitLoss: priceChange
             };
 
-            // NEW: Wait for confirmation before cleaning up position
+            // Wait for confirmation before cleaning up position
             this.waitForConfirmationWithCallback(
                 txHash,
                 // On Success: Clean up position
@@ -490,45 +603,52 @@ export class TokenSwapService {
 
                     const profitEmoji = priceChange > 0 ? '📈' : '📉';
                     logger.info(`${profitEmoji} POSITION CLOSED: ${position.tokenSymbol} (${priceChange.toFixed(2)}% P/L) - ${reason}`);
+
+                    // Remove from retry queue on success
+                    if (this.failedTransactions.has(txKey)) {
+                        this.failedTransactions.delete(txKey);
+                    }
                 },
                 // On Failure: Keep position active, log error
                 async (error) => {
                     logger.error(`❌ SELL FAILED ON-CHAIN: ${position.tokenSymbol} - ${error.message}`);
                     logger.warn(`⚠️ Position remains active, will retry sell`);
 
-                    // Add to retry queue
-                    if (!isRetry || !this.failedTransactions.has(txKey)) {
-                        this.failedTransactions.set(txKey, {
-                            transaction: position,
-                            type: 'sell',
-                            attempts: isRetry ? 1 : 0,
-                            lastError: error.message,
-                            lastAttempt: Date.now(),
-                            reason
-                        });
-                    }
+                    // Properly handle retry attempts for sells
+                    const existing = this.failedTransactions.get(txKey);
+                    const currentAttempts = existing ? existing.attempts + 1 : (isRetry ? 1 : 0);
+
+                    this.failedTransactions.set(txKey, {
+                        transaction: position,
+                        type: 'sell',
+                        attempts: currentAttempts,
+                        lastError: error.message,
+                        lastAttempt: Date.now(),
+                        reason
+                    });
                 }
             );
 
             // Release pending lock immediately after sending
             this.pendingSellingTokens.delete(tokenCA);
-            if (isRetry) this.failedTransactions.delete(txKey);
 
         } catch (error) {
             this.pendingSellingTokens.delete(tokenCA);
             const errorMessage = error instanceof Error ? error.message : String(error);
             logger.error(`❌ Sell failed: ${errorMessage}`);
 
-            if (!isRetry || !this.failedTransactions.has(txKey)) {
-                this.failedTransactions.set(txKey, {
-                    transaction: position,
-                    type: 'sell',
-                    attempts: isRetry ? 1 : 0,
-                    lastError: errorMessage,
-                    lastAttempt: Date.now(),
-                    reason
-                });
-            }
+            // Properly handle retry attempts in catch block
+            const existing = this.failedTransactions.get(txKey);
+            const currentAttempts = existing ? existing.attempts + 1 : (isRetry ? 1 : 0);
+
+            this.failedTransactions.set(txKey, {
+                transaction: position,
+                type: 'sell',
+                attempts: currentAttempts,
+                lastError: errorMessage,
+                lastAttempt: Date.now(),
+                reason
+            });
         }
     }
 
